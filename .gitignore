@@ -1,0 +1,43 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build outputs
+dist/
+build/
+.next/
+.turbo/
+*.tsbuildinfo
+
+# Env
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# Logs
+logs/
+*.log
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+.vscode/*
+!.vscode/extensions.json
+.idea/
+.claude/
+
+# Coverage
+coverage/
+*.lcov
+
+# Backups + uploads locales
+backups/
+*.sql.gz
+uploads/
+storage/
+
+# Datos sensibles que jamás van al repo
+*.pem
+*.key
+encryption-keys.json

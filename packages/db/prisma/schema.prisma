@@ -1,0 +1,1066 @@
+// ============================================================
+// Surco Health — Prisma Schema
+//
+// Multi-tenant SaaS para consultorios médicos, odontológicos,
+// psicológicos y de salud. Cumple con:
+//   - Habeas Data Colombia (Ley 1581/2012)
+//   - Resolución 1995/1999 (HCE estructurada, retención 15 años)
+//   - Resolución 866/2021 (interoperabilidad FHIR)
+//   - Ley 527/1999 (firma electrónica)
+// ============================================================
+
+generator client {
+  provider      = "prisma-client-js"
+  // Para Docker en producción (debian-12 + openssl 3)
+  binaryTargets = ["native", "debian-openssl-3.0.x"]
+}
+
+datasource db {
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  extensions = [pgcrypto, pg_trgm]
+}
+
+// ============================================================
+// MONETIZACIÓN
+// ============================================================
+enum PlanTier {
+  FREE
+  PRO
+  CLINICA
+  ENTERPRISE
+}
+
+model Plan {
+  id                          String   @id @default(cuid())
+  tier                        PlanTier @unique
+  name                        String
+  priceMonthlyUsd             Decimal  @db.Decimal(10, 2)
+  // Límites duros
+  maxProfessionals            Int
+  maxAppointmentsPerMonth     Int? // null = ilimitado
+  maxStorageGb                Int      @default(1)
+  // Features gateadas
+  whatsappEnabled             Boolean  @default(false)
+  whatsappMonthlyLimit        Int?     // null = ilimitado (si Enabled)
+  telehealthEnabled           Boolean  @default(false)
+  electronicInvoiceEnabled    Boolean  @default(false)
+  fhirExportEnabled           Boolean  @default(false)
+  customDomainEnabled         Boolean  @default(false)
+  multiSiteEnabled            Boolean  @default(false)
+  prioritySupport             Boolean  @default(false)
+  // Stripe / Wompi
+  stripePriceId               String?  @unique
+  wompiPlanId                 String?  @unique
+  isActive                    Boolean  @default(true)
+  createdAt                   DateTime @default(now())
+
+  tenants Tenant[]
+}
+
+// ============================================================
+// TENANT (CLÍNICA / CONSULTORIO)
+// ============================================================
+enum Country {
+  CO  // Colombia
+  MX
+  AR
+  CL
+  PE
+  EC
+  ES
+  US
+  OTHER
+}
+
+model Tenant {
+  id           String   @id @default(cuid())
+  legalName    String   // "Clínica Dental Sonrisa SAS"
+  tradeName    String   // "Sonrisa Clinic"
+  slug         String   @unique
+  // Identificación tributaria
+  taxId        String?  // NIT, RFC, CUIT
+  taxIdType    String?  // "NIT", "RFC", "CUIT"
+  // Ubicación
+  country      Country  @default(CO)
+  timezone     String   @default("America/Bogota")
+  currency     String   @default("COP")
+  // Branding
+  logoUrl      String?
+  primaryColor String?  @default("#5b6cff")
+  // Tipo de clínica (orientación principal — no excluyente)
+  primarySpecialty Specialty?
+  // Plan
+  planId          String
+  plan            Plan      @relation(fields: [planId], references: [id])
+  planExpiresAt   DateTime?
+  trialEndsAt     DateTime?
+  isActive        Boolean   @default(true)
+  // Stripe
+  stripeCustomerId         String? @unique
+  stripeSubscriptionId     String? @unique
+  stripeSubscriptionStatus String?
+  // Compliance
+  privacyPolicyAcceptedAt  DateTime? // owner aceptó política Habeas Data
+  rnbdRegistered           Boolean  @default(false) // registró BD ante SIC
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  users            User[]
+  patients         Patient[]
+  sites            Site[]
+  appointments     Appointment[]
+  schedules        ProfessionalSchedule[]
+  clinicalRecords  ClinicalRecord[]
+  prescriptions    Prescription[]
+  consents         Consent[]
+  files            ClinicalFile[]
+  services         ClinicalService[]
+  invoices         Invoice[]
+  payments         Payment[]
+  notifications    NotificationLog[]
+  auditLogs        AuditLog[]
+  teleSessions     TelehealthSession[]
+
+  @@index([slug])
+  @@index([country])
+}
+
+// ============================================================
+// SEDES (multi-site, plan CLINICA+)
+// ============================================================
+model Site {
+  id          String   @id @default(cuid())
+  tenantId    String
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  name        String   // "Sede Norte"
+  address     String?
+  phone       String?
+  email       String?
+  isMain      Boolean  @default(false)
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+
+  rooms        Room[]
+  appointments Appointment[]
+  professionalsAtSite ProfessionalSite[]
+
+  @@index([tenantId])
+}
+
+model Room {
+  id       String  @id @default(cuid())
+  siteId   String
+  site     Site    @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  name     String  // "Consultorio 1", "Sala de Rayos X"
+  isActive Boolean @default(true)
+  appointments Appointment[]
+
+  @@index([siteId])
+}
+
+model ProfessionalSite {
+  id             String @id @default(cuid())
+  siteId         String
+  site           Site   @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  professionalId String
+  professional   User   @relation(fields: [professionalId], references: [id], onDelete: Cascade)
+
+  @@unique([siteId, professionalId])
+}
+
+// ============================================================
+// USUARIOS Y ROLES
+// ============================================================
+enum UserRole {
+  SAAS_ADMIN        // Superadmin de la plataforma
+  CLINIC_OWNER      // Dueño/admin de la clínica
+  PROFESSIONAL      // Médico, odontólogo, psicólogo, etc.
+  RECEPTIONIST      // Recepción (no ve HCE clínica)
+  BILLING           // Facturación (no ve HCE clínica)
+}
+
+enum Specialty {
+  MEDICAL_GENERAL
+  DENTAL
+  PSYCHOLOGY
+  PSYCHIATRY
+  PEDIATRICS
+  GYNECOLOGY
+  DERMATOLOGY
+  CARDIOLOGY
+  NUTRITION
+  PHYSIOTHERAPY
+  AESTHETICS
+  OPHTHALMOLOGY
+  ORTHOPEDICS
+  OTORHINOLARYNGOLOGY
+  OTHER
+}
+
+model User {
+  id           String   @id @default(cuid())
+  tenantId     String?  // null para SAAS_ADMIN
+  tenant       Tenant?  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  email        String   @unique
+  passwordHash String
+  fullName     String
+  phone        String?
+  role         UserRole
+  isActive     Boolean  @default(true)
+  // Datos del profesional (cuando role = PROFESSIONAL)
+  specialty           Specialty?
+  licenseNumber       String?       // RNGM Colombia, Cédula profesional México, Matrícula AR
+  licenseAuthority    String?       // "Minsalud Colombia", "DGP México", etc.
+  signatureImageUrl   String?       // imagen de firma manuscrita digitalizada
+  digitalSignatureId  String?       // ID del certificado digital (Certicámara, etc.)
+  // MFA
+  mfaEnabled          Boolean       @default(false)
+  mfaSecret           String?       // TOTP secret encriptado
+  // Tracking
+  lastLoginAt   DateTime?
+  lastLoginIp   String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  appointments    Appointment[]          @relation("ProfessionalAppointments")
+  schedules       ProfessionalSchedule[]
+  clinicalRecords ClinicalRecord[]
+  prescriptions   Prescription[]
+  refreshTokens   RefreshToken[]
+  sites           ProfessionalSite[]
+  auditLogs       AuditLog[]             @relation("ActorAuditLogs")
+  teleSessions    TelehealthSession[]    @relation("ProfessionalTeleSessions")
+
+  @@index([tenantId, role])
+  @@index([tenantId, specialty])
+}
+
+model RefreshToken {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String   @unique
+  expiresAt DateTime
+  revokedAt DateTime?
+  userAgent String?
+  ipAddress String?
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+}
+
+// ============================================================
+// PACIENTES
+// ============================================================
+enum DocumentType {
+  CC      // Cédula de Ciudadanía Colombia
+  TI      // Tarjeta de Identidad Colombia
+  CE      // Cédula de Extranjería
+  RC      // Registro Civil
+  PA      // Pasaporte
+  RFC     // RFC México
+  DNI     // DNI Argentina/Perú
+  PASSPORT
+  OTHER
+}
+
+enum Gender {
+  MALE
+  FEMALE
+  NON_BINARY
+  PREFER_NOT_TO_SAY
+  OTHER
+}
+
+enum BloodType {
+  A_POS
+  A_NEG
+  B_POS
+  B_NEG
+  AB_POS
+  AB_NEG
+  O_POS
+  O_NEG
+  UNKNOWN
+}
+
+model Patient {
+  id              String        @id @default(cuid())
+  tenantId        String
+  tenant          Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  // Identificación
+  documentType    DocumentType
+  documentId      String
+  fullName        String
+  birthdate       DateTime
+  gender          Gender
+  // Contacto
+  phone           String?
+  email           String?
+  address         String?
+  city            String?
+  // Datos clínicos basales (consultados frecuentemente — quedan en claro)
+  bloodType       BloodType    @default(UNKNOWN)
+  allergiesSummary String?      // texto corto visible para profesionales
+  // Asegurador / EPS / IPS
+  insurerName     String?
+  insurerPlan     String?
+  insurerNumber   String?
+  // Contacto de emergencia
+  emergencyName   String?
+  emergencyPhone  String?
+  emergencyRel    String? // "madre", "esposo"
+  // Habeas Data — autorización del paciente
+  privacyAcceptedAt DateTime?
+  privacyVersion    String?
+  // Notas administrativas (no clínicas)
+  notes           String?
+  // Estado
+  isActive        Boolean       @default(true)
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  appointments    Appointment[]
+  clinicalRecords ClinicalRecord[]
+  prescriptions   Prescription[]
+  consents        Consent[]
+  files           ClinicalFile[]
+  invoices        Invoice[]
+  // Perfiles clínicos por especialidad (opcionales)
+  dentalChart        DentalChart?
+  medicalProfile     MedicalProfile?
+  psychologyProfile  PsychologyProfile?
+  pediatricProfile   PediatricProfile?
+
+  @@unique([tenantId, documentType, documentId])
+  @@index([tenantId, fullName])
+  @@index([tenantId, phone])
+}
+
+// ============================================================
+// AGENDA Y CITAS
+// ============================================================
+enum AppointmentStatus {
+  REQUESTED       // solicitada por el paciente, sin confirmar
+  CONFIRMED
+  CHECKED_IN      // paciente llegó
+  IN_PROGRESS     // consulta en curso
+  ATTENDED        // consulta finalizada (sin cancelación)
+  NO_SHOW
+  CANCELLED
+}
+
+enum AppointmentChannel {
+  IN_PERSON
+  TELEHEALTH
+}
+
+model Appointment {
+  id             String              @id @default(cuid())
+  tenantId       String
+  tenant         Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  siteId         String?
+  site           Site?               @relation(fields: [siteId], references: [id])
+  roomId         String?
+  room           Room?               @relation(fields: [roomId], references: [id])
+  patientId      String
+  patient        Patient             @relation(fields: [patientId], references: [id])
+  professionalId String
+  professional   User                @relation("ProfessionalAppointments", fields: [professionalId], references: [id])
+  serviceId      String?
+  service        ClinicalService?    @relation(fields: [serviceId], references: [id])
+  startsAt       DateTime
+  endsAt         DateTime
+  status         AppointmentStatus   @default(CONFIRMED)
+  channel        AppointmentChannel  @default(IN_PERSON)
+  // Notas administrativas (motivo de consulta, no es HCE)
+  reason         String?
+  internalNotes  String?
+  // Tele
+  telehealthSession TelehealthSession?
+  // Cancelación / no-show
+  cancelledAt    DateTime?
+  cancelledBy    String?  // userId o "patient"
+  cancelReason   String?
+  // Recordatorios
+  reminderSentAt DateTime?
+  // Audit
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+  createdBy      String?             // userId o "public" (reserva pública)
+
+  clinicalRecords ClinicalRecord[]
+  invoice         Invoice?
+
+  @@index([tenantId, professionalId, startsAt])
+  @@index([tenantId, patientId])
+  @@index([tenantId, startsAt])
+  @@index([tenantId, status])
+}
+
+// Horarios de trabajo + bloqueos
+model ProfessionalSchedule {
+  id             String   @id @default(cuid())
+  tenantId       String
+  tenant         Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  professionalId String
+  professional   User     @relation(fields: [professionalId], references: [id], onDelete: Cascade)
+  // Si type=AVAILABILITY: dayOfWeek (0=Dom) y startTime/endTime define disponibilidad recurrente
+  // Si type=BLOCK: fecha+rango específico (almuerzo, vacaciones)
+  type           ScheduleType
+  dayOfWeek      Int?         // 0-6 (solo si AVAILABILITY)
+  startTime      String?      // "09:00" (formato HH:mm)
+  endTime        String?      // "18:00"
+  startsAt       DateTime?    // datetime exacto (solo si BLOCK)
+  endsAt         DateTime?
+  reason         String?      // "Almuerzo", "Cirugía"
+  createdAt      DateTime     @default(now())
+
+  @@index([tenantId, professionalId])
+}
+
+enum ScheduleType {
+  AVAILABILITY
+  BLOCK
+}
+
+// ============================================================
+// CATÁLOGO DE SERVICIOS CLÍNICOS
+// ============================================================
+model ClinicalService {
+  id              String    @id @default(cuid())
+  tenantId        String
+  name            String    // "Consulta odontológica de primera vez", "Limpieza dental"
+  description     String?
+  durationMinutes Int
+  // Precios
+  priceParticular Decimal   @db.Decimal(12, 2) // particular
+  priceInsurer    Decimal?  @db.Decimal(12, 2) // con asegurador
+  // Especialidad (filtra catálogo según profesional)
+  specialty       Specialty?
+  // CIE-10 sugerido (cuando aplica)
+  defaultCieCode  String?
+  isActive        Boolean   @default(true)
+  createdAt       DateTime  @default(now())
+
+  appointments Appointment[]
+  invoiceItems InvoiceItem[]
+
+  @@index([tenantId, specialty, isActive])
+}
+
+// ============================================================
+// HISTORIA CLÍNICA ELECTRÓNICA (HCE) — APPEND-ONLY
+// ============================================================
+enum ClinicalRecordType {
+  // Genéricos
+  CONSULTATION            // consulta médica general
+  EVOLUTION_NOTE          // nota de evolución
+  // Específicos por especialidad
+  DENTAL_TREATMENT        // tratamiento odontológico
+  PSYCHOLOGY_SOAP         // nota SOAP psicología (encriptada)
+  PSYCHOMETRIC_TEST       // resultado de test psicométrico
+  PEDIATRIC_CHECKUP       // control pediátrico
+  AESTHETIC_PROCEDURE     // procedimiento estético
+  // Soporte clínico
+  PRESCRIPTION
+  LAB_ORDER
+  IMAGING_ORDER
+  REFERRAL                // remisión a otro especialista
+  CERTIFICATE             // incapacidad, certificado médico
+  // Adendas
+  AMENDMENT               // adenda a registro previo
+}
+
+model ClinicalRecord {
+  id             String             @id @default(cuid())
+  tenantId       String
+  tenant         Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  patientId      String
+  patient        Patient            @relation(fields: [patientId], references: [id])
+  professionalId String
+  professional   User               @relation(fields: [professionalId], references: [id])
+  appointmentId  String?
+  appointment    Appointment?       @relation(fields: [appointmentId], references: [id])
+  type           ClinicalRecordType
+  // Datos estructurados (CIE-10, signos vitales, etc.)
+  structuredData Json
+  // Texto libre — ENCRIPTADO at-rest con pgcrypto
+  // Se guarda con pgp_sym_encrypt(text, app.encryption_key)
+  // Y se lee con pgp_sym_decrypt(content, app.encryption_key)
+  encryptedText  Bytes?
+  // Versionado — adendas en lugar de updates
+  version             Int       @default(1)
+  previousRecordId    String?
+  previousRecord      ClinicalRecord?  @relation("RecordAmendments", fields: [previousRecordId], references: [id])
+  amendments          ClinicalRecord[] @relation("RecordAmendments")
+  // Bloqueo de privacidad (psicología)
+  isLocked       Boolean            @default(false)
+  // Firma del profesional
+  signedAt       DateTime?
+  signatureHash  String?            // hash del contenido al momento de firmar (no-repudio)
+  // Soft-delete (jamás se elimina físicamente — retención 15 años)
+  archivedAt     DateTime?
+  archivedReason String?
+  createdAt      DateTime           @default(now())
+
+  // Relaciones específicas por tipo (cuando aplican)
+  vitalSigns         VitalSigns?
+  dentalProcedures   DentalProcedure[]
+  soapNote           SoapNote?
+  psychometricResult PsychometricResult?
+
+  files ClinicalFile[]
+
+  @@index([tenantId, patientId, createdAt])
+  @@index([tenantId, professionalId])
+  @@index([tenantId, type])
+}
+
+// ============================================================
+// MÓDULO DENTAL: ODONTOGRAMA Y TRATAMIENTOS
+// ============================================================
+enum ToothNumberingSystem {
+  FDI       // 11-18, 21-28, 31-38, 41-48 (ISO 3950, más usado LATAM)
+  UNIVERSAL // 1-32
+  PALMER    // cuadrantes con símbolos
+}
+
+model DentalChart {
+  id           String                @id @default(cuid())
+  patientId    String                @unique
+  patient      Patient               @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  numbering    ToothNumberingSystem  @default(FDI)
+  // Estado de cada superficie de cada diente
+  // JSON: { "11": { "mesial": "CARIES", "distal": "OK", "oclusal": "FILLING", ... }, ... }
+  state        Json                  @default("{}")
+  lastUpdatedAt DateTime             @default(now())
+  updatedAt    DateTime              @updatedAt
+}
+
+enum DentalSurface {
+  MESIAL
+  DISTAL
+  OCCLUSAL
+  LINGUAL
+  VESTIBULAR
+  PALATAL
+}
+
+enum DentalCondition {
+  HEALTHY
+  CARIES
+  FILLING_AMALGAM
+  FILLING_RESIN
+  FILLING_TEMP
+  CROWN
+  IMPLANT
+  EXTRACTION_NEEDED
+  EXTRACTED
+  ROOT_CANAL
+  BRIDGE
+  SEALANT
+  FRACTURE
+  MOBILITY
+  ABSENT
+}
+
+model DentalProcedure {
+  id              String          @id @default(cuid())
+  clinicalRecordId String
+  clinicalRecord  ClinicalRecord  @relation(fields: [clinicalRecordId], references: [id], onDelete: Cascade)
+  toothNumber     String          // "11", "32" — string para soportar diferentes notaciones
+  surfaces        DentalSurface[]
+  condition       DentalCondition
+  treatment       String?         // descripción libre adicional
+  cost            Decimal?        @db.Decimal(12, 2)
+  status          DentalProcedureStatus @default(PLANNED)
+  performedAt     DateTime?
+}
+
+enum DentalProcedureStatus {
+  PLANNED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+// ============================================================
+// MÓDULO MÉDICO GENERAL: SIGNOS VITALES + PERFIL
+// ============================================================
+model MedicalProfile {
+  id                  String   @id @default(cuid())
+  patientId           String   @unique
+  patient             Patient  @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  // Antecedentes (texto libre encriptado)
+  personalHistoryEnc  Bytes?
+  familyHistoryEnc    Bytes?
+  surgicalHistoryEnc  Bytes?
+  allergiesDetailEnc  Bytes?
+  currentMedsEnc      Bytes?
+  // Hábitos
+  smoker              Boolean? @default(false)
+  alcohol             String?  // "ocasional", "frecuente", "no"
+  exercise            String?
+  updatedAt           DateTime @updatedAt
+}
+
+model VitalSigns {
+  id              String        @id @default(cuid())
+  clinicalRecordId String       @unique
+  clinicalRecord  ClinicalRecord @relation(fields: [clinicalRecordId], references: [id], onDelete: Cascade)
+  // Presión arterial
+  systolicMmHg    Int?
+  diastolicMmHg   Int?
+  // Frecuencia cardíaca (bpm)
+  heartRate       Int?
+  // Frecuencia respiratoria (rpm)
+  respiratoryRate Int?
+  // Temperatura (°C)
+  temperatureC    Decimal?      @db.Decimal(4, 2)
+  // SpO2 (%)
+  oxygenSaturation Int?
+  // Antropometría
+  weightKg        Decimal?      @db.Decimal(6, 2)
+  heightCm        Decimal?      @db.Decimal(5, 1)
+  bmi             Decimal?      @db.Decimal(5, 2) // calculado
+  waistCm         Decimal?      @db.Decimal(5, 1)
+  headCircumferenceCm Decimal?  @db.Decimal(5, 1) // pediatría
+  // Glucemia opcional
+  glucoseMgDl     Int?
+  // Dolor escala 0-10
+  painScale       Int?
+  measuredAt      DateTime      @default(now())
+}
+
+// Catálogo CIE-10 (importado de Minsalud Colombia)
+model Icd10Code {
+  code        String   @id      // "A00.0"
+  description String
+  parentCode  String?
+  isCategory  Boolean  @default(false)
+
+  @@index([parentCode])
+}
+
+// Diagnósticos asociados a un registro clínico
+model Diagnosis {
+  id              String   @id @default(cuid())
+  clinicalRecordId String
+  icd10Code       String
+  description     String?  // override / texto libre adicional
+  isPrimary       Boolean  @default(false)
+  type            DiagnosisType @default(CONFIRMED)
+  createdAt       DateTime @default(now())
+
+  @@index([clinicalRecordId])
+}
+
+enum DiagnosisType {
+  PRESUMPTIVE
+  CONFIRMED
+  DIFFERENTIAL
+  RULE_OUT
+}
+
+// ============================================================
+// MÓDULO PSICOLOGÍA: NOTAS SOAP + TESTS
+// ============================================================
+model PsychologyProfile {
+  id                  String   @id @default(cuid())
+  patientId           String   @unique
+  patient             Patient  @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  // Datos psicológicos basales (encriptados)
+  reasonForConsultEnc Bytes?
+  treatmentGoalsEnc   Bytes?
+  // Genograma (estructura JSON)
+  genogram            Json?
+  // Riesgo (escala simple)
+  suicideRiskLevel    RiskLevel @default(NONE)
+  selfHarmRiskLevel   RiskLevel @default(NONE)
+  updatedAt           DateTime  @updatedAt
+}
+
+enum RiskLevel {
+  NONE
+  LOW
+  MEDIUM
+  HIGH
+  IMMINENT
+}
+
+model SoapNote {
+  id              String         @id @default(cuid())
+  clinicalRecordId String        @unique
+  clinicalRecord  ClinicalRecord @relation(fields: [clinicalRecordId], references: [id], onDelete: Cascade)
+  // Todos los campos ENCRIPTADOS (estricto en psicología)
+  subjectiveEnc   Bytes  // lo que dice el paciente
+  objectiveEnc    Bytes  // observación del clínico
+  assessmentEnc   Bytes  // análisis / impresión diagnóstica
+  planEnc         Bytes  // plan / tarea para próxima sesión
+  // Riesgo evaluado en esta sesión
+  riskFlag        RiskLevel @default(NONE)
+}
+
+// Catálogo de tests psicométricos disponibles
+model PsychometricTestDefinition {
+  id          String  @id @default(cuid())
+  code        String  @unique  // "BDI-II", "GAD-7", "PHQ-9", "DASS-21", "MMPI"
+  name        String
+  description String?
+  // Estructura de preguntas y reglas de scoring (JSON)
+  schema      Json
+  isActive    Boolean @default(true)
+
+  results PsychometricResult[]
+}
+
+model PsychometricResult {
+  id               String         @id @default(cuid())
+  clinicalRecordId String         @unique
+  clinicalRecord   ClinicalRecord @relation(fields: [clinicalRecordId], references: [id], onDelete: Cascade)
+  testId           String
+  test             PsychometricTestDefinition @relation(fields: [testId], references: [id])
+  // Respuestas crudas (encriptadas)
+  answersEnc       Bytes
+  // Score calculado + interpretación
+  score            Decimal        @db.Decimal(8, 2)
+  interpretation   String?        // "Depresión moderada", "Ansiedad mínima"
+  flags            String[]       // banderas detectadas
+  takenAt          DateTime       @default(now())
+}
+
+// ============================================================
+// MÓDULO PEDIÁTRICO: CURVAS DE CRECIMIENTO + VACUNAS
+// ============================================================
+model PediatricProfile {
+  id              String   @id @default(cuid())
+  patientId       String   @unique
+  patient         Patient  @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  birthWeightKg   Decimal? @db.Decimal(5, 3)
+  birthHeightCm   Decimal? @db.Decimal(4, 1)
+  gestationalAgeWeeks Int?
+  // Esquema vacunal (PAI Colombia, etc.) — array de vacunas aplicadas
+  vaccines        Vaccine[]
+}
+
+model Vaccine {
+  id                String   @id @default(cuid())
+  pediatricProfileId String
+  pediatricProfile  PediatricProfile @relation(fields: [pediatricProfileId], references: [id], onDelete: Cascade)
+  name              String   // "Pentavalente", "Triple viral"
+  doseNumber        Int      // 1, 2, 3...
+  appliedAt         DateTime
+  appliedBy         String?  // user id o nombre externo
+  lotNumber         String?
+  notes             String?
+}
+
+// ============================================================
+// PRESCRIPCIONES (RECETAS)
+// ============================================================
+enum PrescriptionStatus {
+  DRAFT
+  ISSUED
+  DELIVERED      // entregada al paciente
+  CANCELLED
+}
+
+model Prescription {
+  id              String              @id @default(cuid())
+  tenantId        String
+  tenant          Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  patientId       String
+  patient         Patient             @relation(fields: [patientId], references: [id])
+  professionalId  String
+  professional    User                @relation(fields: [professionalId], references: [id])
+  clinicalRecordId String?            // ligada a la consulta
+  // Datos
+  diagnosis       String?
+  notes           String?
+  // Para Colombia: si es No-PBS, debe ir por MIPRES (el SaaS NO la emite, solo registra)
+  isMipres        Boolean             @default(false)
+  mipresOrderId   String?             // ID que devuelve MIPRES tras prescribir allá
+  // Estado
+  status          PrescriptionStatus  @default(DRAFT)
+  issuedAt        DateTime?
+  // Firma
+  signedAt        DateTime?
+  signatureHash   String?
+  // PDF generado
+  pdfUrl          String?
+  createdAt       DateTime            @default(now())
+
+  items           PrescriptionItem[]
+}
+
+model PrescriptionItem {
+  id             String        @id @default(cuid())
+  prescriptionId String
+  prescription   Prescription  @relation(fields: [prescriptionId], references: [id], onDelete: Cascade)
+  drugName       String        // "Acetaminofén 500 mg"
+  presentation   String?       // "Tabletas"
+  dose           String        // "1 tableta"
+  frequency      String        // "Cada 8 horas"
+  durationDays   Int?
+  quantity       String?       // "30 tabletas"
+  instructions   String?       // "Tomar después de comidas"
+  ordering       Int           @default(0)
+}
+
+// ============================================================
+// CONSENTIMIENTOS INFORMADOS
+// ============================================================
+model ConsentTemplate {
+  id          String   @id @default(cuid())
+  tenantId    String
+  name        String   // "Consentimiento implante dental", "Tratamiento psicológico"
+  bodyMarkdown String  // texto con merge tags: {{patient.fullName}}, {{date}}, etc.
+  version     Int      @default(1)
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+
+  consents Consent[]
+
+  @@index([tenantId])
+}
+
+model Consent {
+  id            String           @id @default(cuid())
+  tenantId      String
+  tenant        Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  patientId     String
+  patient       Patient          @relation(fields: [patientId], references: [id])
+  templateId    String
+  template      ConsentTemplate  @relation(fields: [templateId], references: [id])
+  // Captura
+  bodyRendered  String           // texto final con merge realizado (snapshot inmutable)
+  signedAt      DateTime?
+  signatureImg  String?          // canvas en data URL (base64) — quedará en S3 referenciada
+  signatureIp   String?
+  signatureUserAgent String?
+  // Hash para no-repudio
+  bodyHash      String           // SHA-256 del body + signature
+  // PDF
+  pdfUrl        String?
+  createdAt     DateTime         @default(now())
+}
+
+// ============================================================
+// ARCHIVOS CLÍNICOS (radiografías, labs, fotos, etc.)
+// ============================================================
+enum FileType {
+  RADIOGRAPHY     // panorámica, periapical
+  CBCT            // tomografía
+  LAB_RESULT      // PDF resultado lab
+  CLINICAL_PHOTO  // foto clínica (estética, dermatología)
+  REFERRAL_DOC
+  PRESCRIPTION_PDF
+  CONSENT_PDF
+  REPORT
+  OTHER
+}
+
+model ClinicalFile {
+  id              String    @id @default(cuid())
+  tenantId        String
+  tenant          Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  patientId       String?
+  patient         Patient?  @relation(fields: [patientId], references: [id])
+  clinicalRecordId String?
+  clinicalRecord  ClinicalRecord? @relation(fields: [clinicalRecordId], references: [id])
+  type            FileType
+  fileName        String
+  mimeType        String
+  sizeBytes       Int
+  // Storage
+  s3Bucket        String
+  s3Key           String
+  s3Etag          String?
+  // SHA-256 del contenido (integridad)
+  sha256          String
+  // Captura
+  uploadedBy      String
+  uploadedAt      DateTime  @default(now())
+  // Soft-delete
+  archivedAt      DateTime?
+
+  @@index([tenantId, patientId])
+  @@index([tenantId, type])
+}
+
+// ============================================================
+// TELECONSULTA
+// ============================================================
+model TelehealthSession {
+  id              String        @id @default(cuid())
+  tenantId        String
+  tenant          Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  appointmentId   String        @unique
+  appointment     Appointment   @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
+  professionalId  String
+  professional    User          @relation("ProfessionalTeleSessions", fields: [professionalId], references: [id])
+  // Daily.co
+  roomName        String        @unique
+  roomUrl         String
+  professionalToken String?     // JWT pre-firmado, expira al cerrar
+  patientToken    String?
+  startedAt       DateTime?
+  endedAt         DateTime?
+  durationSeconds Int?
+  // Grabación (opt-in con consentimiento)
+  recordingEnabled Boolean      @default(false)
+  recordingUrl    String?
+  createdAt       DateTime      @default(now())
+
+  @@index([tenantId, professionalId])
+}
+
+// ============================================================
+// FACTURACIÓN (al paciente — distinto a billing del SaaS)
+// ============================================================
+enum InvoiceStatus {
+  DRAFT
+  ISSUED        // emitida (con o sin FE)
+  PAID
+  PARTIAL
+  CANCELLED
+  REFUNDED
+}
+
+enum PaymentMethod {
+  CASH
+  CARD
+  TRANSFER
+  INSURER       // cobro a EPS/aseguradora
+  MIXED
+}
+
+model Invoice {
+  id              String         @id @default(cuid())
+  tenantId        String
+  tenant          Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  patientId       String
+  patient         Patient        @relation(fields: [patientId], references: [id])
+  appointmentId   String?        @unique
+  appointment     Appointment?   @relation(fields: [appointmentId], references: [id])
+  // Numeración
+  number          String         // "FE-001234"
+  // Totales
+  subtotal        Decimal        @db.Decimal(14, 2)
+  taxAmount       Decimal        @db.Decimal(14, 2) @default(0)
+  discount        Decimal        @db.Decimal(14, 2) @default(0)
+  total           Decimal        @db.Decimal(14, 2)
+  status          InvoiceStatus  @default(DRAFT)
+  // Facturación electrónica (DIAN Colombia, CFDI México, etc.)
+  feProvider      String?        // "facture", "alegra"
+  feExternalId    String?        // ID del proveedor
+  feXmlUrl        String?
+  feCufeOrUuid    String?
+  feStatus        String?
+  issuedAt        DateTime?
+  // RIPS (Colombia)
+  ripsSent        Boolean        @default(false)
+  ripsSentAt      DateTime?
+  createdAt       DateTime       @default(now())
+
+  items    InvoiceItem[]
+  payments Payment[]
+
+  @@unique([tenantId, number])
+  @@index([tenantId, createdAt])
+}
+
+model InvoiceItem {
+  id           String           @id @default(cuid())
+  invoiceId    String
+  invoice      Invoice          @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  serviceId    String?
+  service      ClinicalService? @relation(fields: [serviceId], references: [id])
+  description  String
+  quantity     Int              @default(1)
+  unitPrice    Decimal          @db.Decimal(14, 2)
+  taxPct       Decimal          @db.Decimal(5, 2) @default(0)
+  lineTotal    Decimal          @db.Decimal(14, 2)
+}
+
+model Payment {
+  id            String         @id @default(cuid())
+  tenantId      String
+  tenant        Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  invoiceId     String
+  invoice       Invoice        @relation(fields: [invoiceId], references: [id])
+  method        PaymentMethod
+  amount        Decimal        @db.Decimal(14, 2)
+  reference     String?        // n° de transacción
+  paidAt        DateTime       @default(now())
+  createdBy     String
+
+  @@index([tenantId, paidAt])
+}
+
+// ============================================================
+// NOTIFICACIONES — log de envíos
+// ============================================================
+enum NotificationChannel {
+  WHATSAPP
+  SMS
+  EMAIL
+  PUSH
+}
+
+enum NotificationKind {
+  APPOINTMENT_REMINDER
+  APPOINTMENT_CONFIRMATION
+  APPOINTMENT_CANCELLED
+  PRESCRIPTION_READY
+  INVOICE_ISSUED
+  GENERAL
+}
+
+model NotificationLog {
+  id           String              @id @default(cuid())
+  tenantId     String
+  tenant       Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  recipientId  String?             // patientId o userId
+  toContact    String              // teléfono o email destino
+  channel      NotificationChannel
+  kind         NotificationKind
+  body         String              // texto enviado (no incluye datos sensibles más allá del nombre)
+  externalId   String?             // id en provider (WhatsApp message id, etc.)
+  status       String              // "sent", "delivered", "failed", "read"
+  errorMessage String?
+  scheduledFor DateTime?
+  sentAt       DateTime?
+  deliveredAt  DateTime?
+  createdAt    DateTime            @default(now())
+
+  @@index([tenantId, createdAt])
+}
+
+// ============================================================
+// AUDIT LOG — append-only, OBLIGATORIO POR LEY
+// ============================================================
+model AuditLog {
+  id          String   @id @default(cuid())
+  tenantId    String
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  actorId     String?
+  actor       User?    @relation("ActorAuditLogs", fields: [actorId], references: [id])
+  actorRole   String?
+  // Qué pasó
+  action      String   // "READ_CLINICAL_RECORD", "EXPORT_FHIR", "UPDATE_PATIENT", ...
+  entityType  String   // "ClinicalRecord", "Patient", "Prescription"
+  entityId    String
+  // Contexto
+  metadata    Json?
+  ipAddress   String?
+  userAgent   String?
+  // Cuándo (no permitir update — DB trigger lo hace inmutable)
+  createdAt   DateTime @default(now())
+
+  @@index([tenantId, actorId, createdAt])
+  @@index([tenantId, entityType, entityId])
+  @@index([tenantId, createdAt])
+}
