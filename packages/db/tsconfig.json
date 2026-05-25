@@ -5,7 +5,9 @@
     "rootDir": "src",
     "moduleResolution": "Node",
     "module": "CommonJS",
-    "target": "ES2022"
+    "target": "ES2022",
+    "declaration": false,
+    "declarationMap": false
   },
   "include": ["src/**/*.ts"]
 }
