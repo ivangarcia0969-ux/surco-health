@@ -16,6 +16,7 @@ import clinicalRoutes from './modules/clinical/clinical.routes';
 import dentalRoutes from './modules/dental/dental.routes';
 import medicalRoutes from './modules/medical/medical.routes';
 import psychologyRoutes from './modules/psychology/psychology.routes';
+import catalogRoutes from './modules/catalog/catalog.routes';
 
 async function buildServer() {
   const app = Fastify({
@@ -68,6 +69,7 @@ async function buildServer() {
   await app.register(dentalRoutes, { prefix: '/api/dental' });
   await app.register(medicalRoutes, { prefix: '/api/medical' });
   await app.register(psychologyRoutes, { prefix: '/api/psychology' });
+  await app.register(catalogRoutes, { prefix: '/api/catalog' });
 
   return app;
 }
