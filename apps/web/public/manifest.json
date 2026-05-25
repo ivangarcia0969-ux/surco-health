@@ -1,0 +1,11 @@
+{
+  "name": "Surco Health",
+  "short_name": "Surco",
+  "description": "SaaS para consultorios médicos, dentales y psicológicos",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f9fafb",
+  "theme_color": "#3b6bff",
+  "orientation": "portrait",
+  "lang": "es"
+}
