@@ -2,9 +2,19 @@
 
 > **Documento maestro** que captura todo el trabajo realizado, decisiones tomadas, infraestructura y status de los proyectos SaaS de Iván García.
 >
-> **Última actualización:** 2026-05-25
+> **Última actualización:** 2026-05-25 (Surco Health desplegado en producción 🎊)
 >
 > Este archivo vive en ambos repos (`Barbershop` y `surco-health`) y se mantiene sincronizado por Git para no perder contexto entre sesiones.
+
+## 🏁 HITO CRÍTICO — 2026-05-25 16:30
+
+✅ **Surco Health está VIVO en producción:**
+- https://api.salud.surcoapp.tech/health responde JSON
+- https://app.salud.surcoapp.tech/login funciona con login real
+- 5 containers Docker corriendo: `surco_postgres`, `surco_redis`, `surco_minio`, `surco_api`, `surco_web`
+- Caddy auto-HTTPS con certificados Let's Encrypt
+- Seed cargado con usuarios demo y 5 servicios clínicos
+- Coexiste sin afectar Karpos, Supabase, n8n, open-webui, Barbería
 
 ---
 
@@ -197,14 +207,20 @@ docker compose -f infra/docker-compose.prod.yml --env-file .env exec api pnpm --
 - Dientes "whole" (extraído/ausente/implante/corona) cubren toda la pieza con X superpuesta
 - onChange propaga a `PUT /api/dental/chart/{patientId}`
 
-### Status del deploy (a 2026-05-25)
-- ✅ Repo en GitHub (4 commits, último `eda8273`)
+### Status del deploy (a 2026-05-25 — EN PRODUCCIÓN 🚀)
+- ✅ Repo en GitHub (10 commits, último `f24facc`)
 - ✅ DNS `app.salud` y `api.salud` resuelven a 2.24.89.123
 - ✅ Repo clonado en `/opt/surco-health`
-- ✅ `.env` creado con secretos generados (DB_PASSWORD hex, JWT_* base64, ENCRYPTION_KEY hex32)
-- ⚠️ **ENCRYPTION_KEY GUARDADA EN BACKUP:** `5292b2af1f13138e1f00479189e75e8747b538ace09b5353d114dcc4f3587a37` (visible en screenshot del 2026-05-25, debe migrarse a gestor de secretos como 1Password)
-- ⏳ Build Docker: en progreso al pausar; primer intento falló por `pnpm-lock.yaml` faltante (arreglado en `eda8273`)
-- ⏳ Pendiente: rerun `bash infra/scripts/deploy.sh`, validar Caddy, seed
+- ✅ `.env` creado con secretos generados
+- ✅ **ENCRYPTION_KEY guardada en backup** (screenshot del 2026-05-25; pendiente migrar a 1Password)
+- ✅ Build Docker exitoso tras 4 fixes (ver tabla de bugs abajo)
+- ✅ Postgres + Redis + MinIO containers `Up (healthy)`
+- ✅ API container `Up`, responde a `/health`
+- ✅ Web container `Up`
+- ✅ Caddy: snippet añadido, validado, recargado, certs SSL obtenidos
+- ✅ Seed cargado: 4 planes, SaaS admin, owner, 3 profesionales, recepción, 5 servicios, 3 tests psicométricos, 10 códigos CIE-10, paciente demo
+- ✅ Login probado: `owner@clinicademo.local` / `owner123` → dashboard funcionando
+- ✅ Páginas verificadas en navegador: `/dashboard`, `/agenda`, `/pacientes`, `/pacientes/[id]` con odontograma SVG, `/profesionales`, `/catalogo`, `/ajustes`
 
 ### Para retomar Surco Health:
 ```bash
@@ -290,6 +306,25 @@ docker compose -f infra/docker-compose.prod.yml --env-file .env exec api pnpm --
 | 2 | Prisma validate: `extensions property only available with postgresqlExtensions preview feature` | Sintaxis `extensions = [pgcrypto, pg_trgm]` requiere flag | Añadir `previewFeatures = ["postgresqlExtensions"]` al generator | `eda8273` |
 | 3 | Prisma validate: `relation services missing opposite on ClinicalService` | Tenant.services apuntaba a ClinicalService[] sin back-relation | Añadir `tenant Tenant @relation(...)` a ClinicalService | `eda8273` |
 | 4 | Prisma validate: `Diagnosis.clinicalRecordId` sin relación inversa | Faltaba relation field | Añadir relation en Diagnosis + back-relation `diagnoses ClinicalRecord[]` | `eda8273` |
+| 5 | `tsc` falla en `@surco/audit` con TS2742 | Generación `.d.ts` con tipos Prisma inferidos = paths no portables | `declaration: false` + `declarationMap: false` en tsconfig de audit, encryption, db | `a99ba3b` |
+| 6 | `@surco/audit` build: TS2580 `Cannot find name 'process'` | Audit importa transitivamente db/src/index.ts que usa Node globals, sin `@types/node` | Añadir `@types/node` a devDependencies de audit y encryption | `a99ba3b` |
+| 7 | Caddy 404 en `/profesionales` y `/catalogo` | Sidebar referenciaba rutas sin página creada | Crear `apps/web/src/app/(app)/profesionales/page.tsx` y `/catalogo/page.tsx` | `e3f81ca` |
+| 8 | Caddy validate falla con "Unexpected next token after '{' on same line" | Caddyfile existente sin trailing newline → concatena con snippet | `printf '\n\n' >> Caddyfile` antes del `cat snippet >>` | en VPS al momento |
+| 9 | Caddy validate falla en linea 81 | `request_body { max_size 50MB }` inline no soportado en la versión de Caddy del VPS | Remover esa línea del snippet (default 10MB es suficiente para MVP) | `d0d594e` |
+
+### Patterns NUEVOS aprendidos en Surco Health (aplicar siempre)
+
+10. **`declaration: false` por defecto en todos los packages** del monorepo. Solo activar declarations si vas a publicar a npm. Con `types: src/index.ts` en package.json, TS resuelve tipos directamente desde fuente.
+
+11. **`@types/node` en CADA package que importe del que usa Node globals.** Audit y encryption importan @surco/db que usa `process` y `global` — necesitan los types.
+
+12. **Append a Caddyfile = SIEMPRE `printf '\n\n'` primero.** Los Caddyfiles del VPS no terminan en newline por estilo. Sin esto, la primera línea del snippet se concatena con la última del existente.
+
+13. **`request_body { max_size }` debe ir multi-línea**, no inline. Algunas versiones de Caddy 2 son estrictas.
+
+14. **Validar Prisma schema localmente ANTES de cualquier commit:** `cd packages/db && npx prisma validate`. Saca los errores de relación inversa y de preview features en segundos.
+
+15. **Ejecutar `pnpm install` y commitear `pnpm-lock.yaml` antes del primer push.** Sin lockfile, Dockerfile con `--frozen-lockfile` falla.
 
 ### Patterns que SE TRAJERON de Barbería a Surco Health desde el inicio (evitar repetir)
 
@@ -391,42 +426,62 @@ docker compose -f infra/docker-compose.prod.yml --env-file .env up -d api web
 
 ---
 
-## 📊 Métricas finales por proyecto
+## 📊 Métricas finales por proyecto (a 2026-05-25)
 
 | Métrica | Barbería | Surco Health |
 |---|---|---|
-| Commits | ~14 | 5 |
-| Archivos | ~140 | ~110 |
-| Líneas de código | ~10,500 | ~8,000 |
+| Commits | ~14 | 11 |
+| Archivos | ~140 | ~120 |
+| Líneas de código | ~10,500 | ~9,500 |
 | Modelos Prisma | 15 | 28 |
-| Módulos REST | 14 | 9 |
-| Endpoints REST | ~80 | ~54 |
-| Pantallas frontend | 16 | 8 |
+| Módulos REST | 14 | **10** (auth, tenants, users, patients, appointments, clinical, dental, medical, psychology, **catalog**) |
+| Endpoints REST | ~80 | ~60 |
+| Pantallas frontend | 16 | **10** (landing, login, register, dashboard, agenda, pacientes, paciente/[id], profesionales, catalogo, ajustes) |
 | Verticales soportados | 1 (barbería) | 5 (dental, médico, psico, pediatría, estética) |
 | Compliance LATAM | — | 6 normas (Habeas Data, Res 1995, Res 866, Ley 527, NOM-024, HIPAA) |
+| En producción | Casi (faltan 7 cmds) | ✅ **SÍ** (app.salud.surcoapp.tech) |
+| HTTPS | — | ✅ Let's Encrypt automático |
+| Containers Docker | 4 (parcial) | 5 corriendo (postgres, redis, minio, api, web) |
 
 ---
 
-## 🎯 Próximos pasos pendientes (a 2026-05-25)
+## 🎯 Próximos pasos pendientes (a 2026-05-25 — Surco Health LIVE)
+
+### ✅ Completado en esta sesión
+- ~~Deploy Surco Health al VPS~~ ✓ Vivo en `app.salud.surcoapp.tech` y `api.salud.surcoapp.tech`
+- ~~Páginas `/profesionales` y `/catalogo`~~ ✓ Funcionando
+- ~~Módulo catalog completo con CRUD~~ ✓ Backend + frontend listos (commit `f24facc`)
 
 ### Inmediato (siguiente sesión)
-1. **Surco Health:** retomar deploy en VPS — ya está pull listo, falta correr `bash infra/scripts/deploy.sh` con el fix de `eda8273`
-2. **Barbería:** terminar los últimos 7 comandos para tener HTTPS público
+1. **Surco Health:** rebuild api+web tras commit `f24facc` para activar el módulo catalog en producción
+2. **Barbería:** terminar los últimos 7 comandos para tener HTTPS público en `app.barber.surcoapp.tech`
 
-### Corto plazo
-3. **Surco Health frontend:** completar módulos psicología y profesionales (faltan algunas pantallas detalladas)
-4. **Surco Health backend:** módulo `billing`, módulo `consents`, módulo `prescriptions` y `files` (Dockerfiles ya están listos)
-5. **Crear Stripe Price IDs** reales para ambos proyectos y guardar en `.env`
-6. **WhatsApp Cloud API:** sacar token de Meta y configurar
-7. **Backups automáticos:** cron en VPS para `pg_dump` diario a un bucket S3 externo
+### Corto plazo (features clínicos faltantes)
+3. **Frontend Consulta médica completa** — flujo "Atender" desde agenda con anamnesis + CIE-10 + diagnóstico + plan
+4. **Frontend Notas SOAP psicológicas** (backend ya está, solo falta UI)
+5. **Frontend Aplicar test psicométrico** (PHQ-9, GAD-7, BDI-II — backend ya está)
+6. **Subida de archivos clínicos** a MinIO + visor de radiografías (backend MinIO está vivo en `surco_minio`)
+7. **Recetas médicas con firma + link a MIPRES Colombia**
+8. **Consentimientos informados digitales** con firma canvas
+9. **Página de gastos** (módulo administrativo)
+
+### Configuración / activación de servicios externos
+10. **WhatsApp Cloud API:** sacar token de Meta Business y configurar en `.env`
+11. **Stripe billing real:** crear Price IDs en Stripe Dashboard, actualizar `Plan.stripePriceId` en seed/admin
+12. **Daily.co teleconsulta:** crear cuenta, sacar API key, configurar `.env`
+13. **DIAN facturación electrónica:** contratar Facture / Alegra / Siigo + integrar webhook
+
+### Operación
+14. **Backups automáticos:** cron diario en VPS para `pg_dump` + sync a S3 externo (Backblaze B2 o Cloudflare R2)
+15. **Monitoreo:** Uptime Kuma self-hosted o BetterStack
+16. **CIE-10 completo:** importar dataset Minsalud (~10k códigos vs 10 actuales del seed)
+17. **Política privacidad publicada:** página `/legal/privacidad` con el texto legal Habeas Data
 
 ### Mediano plazo
-8. **Surco Health:** integración Daily.co teleconsulta
-9. **Surco Health:** carga del dataset CIE-10 completo (Minsalud)
-10. **Surco Health:** export FHIR R4 + RDA (Colombia)
-11. **Ambos:** monitoreo (Uptime Kuma o similar)
-12. **Ambos:** tests automatizados (vitest)
-13. **GTM Surco:** registro RNBD ante SIC, política de privacidad publicada, contratos DPA
+18. **FHIR R4 + RDA export** (Colombia interop obligatoria abril 2026)
+19. **Tests automatizados** (vitest) sobre lógica crítica: colisión, encriptación, audit
+20. **Registro RNBD ante SIC** (obligación legal antes de cobrar a primer cliente)
+21. **Onboarding de primer cliente real** (clínica piloto con descuento perpetuo)
 
 ---
 
