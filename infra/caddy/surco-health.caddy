@@ -17,7 +17,6 @@
 
 api.salud.surcoapp.tech {
     encode zstd gzip
-    request_body { max_size 50MB }
 
     reverse_proxy 127.0.0.1:4002 {
         header_up X-Real-IP {http.request.remote.host}
