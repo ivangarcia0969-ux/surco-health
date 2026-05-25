@@ -10,9 +10,11 @@
 // ============================================================
 
 generator client {
-  provider      = "prisma-client-js"
+  provider        = "prisma-client-js"
   // Para Docker en producción (debian-12 + openssl 3)
-  binaryTargets = ["native", "debian-openssl-3.0.x"]
+  binaryTargets   = ["native", "debian-openssl-3.0.x"]
+  // Necesario para declarar extensions en el datasource
+  previewFeatures = ["postgresqlExtensions"]
 }
 
 datasource db {
@@ -431,6 +433,7 @@ enum ScheduleType {
 model ClinicalService {
   id              String    @id @default(cuid())
   tenantId        String
+  tenant          Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   name            String    // "Consulta odontológica de primera vez", "Limpieza dental"
   description     String?
   durationMinutes Int
@@ -510,6 +513,7 @@ model ClinicalRecord {
   dentalProcedures   DentalProcedure[]
   soapNote           SoapNote?
   psychometricResult PsychometricResult?
+  diagnoses          Diagnosis[]
 
   files ClinicalFile[]
 
@@ -646,13 +650,14 @@ model Icd10Code {
 
 // Diagnósticos asociados a un registro clínico
 model Diagnosis {
-  id              String   @id @default(cuid())
+  id              String         @id @default(cuid())
   clinicalRecordId String
+  clinicalRecord  ClinicalRecord @relation(fields: [clinicalRecordId], references: [id], onDelete: Cascade)
   icd10Code       String
-  description     String?  // override / texto libre adicional
-  isPrimary       Boolean  @default(false)
-  type            DiagnosisType @default(CONFIRMED)
-  createdAt       DateTime @default(now())
+  description     String?
+  isPrimary       Boolean        @default(false)
+  type            DiagnosisType  @default(CONFIRMED)
+  createdAt       DateTime       @default(now())
 
   @@index([clinicalRecordId])
 }
