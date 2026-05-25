@@ -1,0 +1,46 @@
+# ============================================================
+# Surco Health — Snippet de Caddyfile
+#
+# Cómo aplicarlo:
+#   1) Backup primero:
+#      sudo cp /etc/caddy/Caddyfile /etc/caddy/Caddyfile.bak.$(date +%Y%m%d_%H%M%S)
+#   2) Pegar este contenido al final de /etc/caddy/Caddyfile
+#      sudo bash -c 'cat /opt/surco-health/infra/caddy/surco-health.caddy >> /etc/caddy/Caddyfile'
+#   3) Validar:
+#      sudo caddy validate --config /etc/caddy/Caddyfile
+#   4) Recargar (sin downtime):
+#      sudo systemctl reload caddy
+#
+# NO toca bloques existentes de Karpos ni Barbería.
+# Caddy obtiene certificados Let's Encrypt automáticamente.
+# ============================================================
+
+api.salud.surcoapp.tech {
+    encode zstd gzip
+    request_body { max_size 50MB }
+
+    reverse_proxy 127.0.0.1:4002 {
+        header_up X-Real-IP {http.request.remote.host}
+    }
+
+    log {
+        output file /var/log/caddy/api.salud.surcoapp.tech.log
+        format json
+    }
+}
+
+app.salud.surcoapp.tech {
+    encode zstd gzip
+
+    @nextStatic path /_next/static/*
+    header @nextStatic Cache-Control "public, max-age=31536000, immutable"
+
+    reverse_proxy 127.0.0.1:3002 {
+        header_up X-Real-IP {http.request.remote.host}
+    }
+
+    log {
+        output file /var/log/caddy/app.salud.surcoapp.tech.log
+        format json
+    }
+}

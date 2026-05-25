@@ -1,0 +1,149 @@
+# ============================================================
+# Surco Health — Producción
+#
+# DISEÑADO PARA COEXISTIR con otras apps Docker del VPS:
+#   - Karpos (ports 3000, 4100, 5432, 5433, 8000, etc.)
+#   - SaaS Barberías (ports 3001, 4001, 5434, 6380)
+#
+# Puertos nuestros (todos bind a 127.0.0.1 — Caddy los proxypasa):
+#   - postgres: 5435   redis: 6381
+#   - api: 4002        web: 3002
+#   - minio: 9002 (API) 9003 (Console)
+#
+# Containers, network y volúmenes con prefijo `surco_*`
+# Nada colisiona con Karpos ni Barbería.
+# ============================================================
+
+name: surco-health
+
+x-restart-policy: &restart unless-stopped
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: surco_postgres
+    restart: *restart
+    environment:
+      POSTGRES_USER: surco
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD requerido}
+      POSTGRES_DB: surco_health
+    volumes:
+      - surco_pgdata:/var/lib/postgresql/data
+      # Script que activa pgcrypto + pg_trgm al primer arranque
+      - ./postgres-init:/docker-entrypoint-initdb.d:ro
+    ports:
+      - "127.0.0.1:5435:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U surco -d surco_health"]
+      interval: 5s
+      timeout: 5s
+      retries: 15
+    networks: [internal]
+
+  redis:
+    image: redis:7-alpine
+    container_name: surco_redis
+    restart: *restart
+    command: ["redis-server", "--save", "60", "1", "--appendonly", "yes"]
+    volumes:
+      - surco_redisdata:/data
+    ports:
+      - "127.0.0.1:6381:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks: [internal]
+
+  minio:
+    image: minio/minio:latest
+    container_name: surco_minio
+    restart: *restart
+    environment:
+      MINIO_ROOT_USER: ${S3_ACCESS_KEY:?S3_ACCESS_KEY requerido}
+      MINIO_ROOT_PASSWORD: ${S3_SECRET_KEY:?S3_SECRET_KEY requerido}
+    command: server /data --console-address ":9001"
+    volumes:
+      - surco_miniodata:/data
+    ports:
+      - "127.0.0.1:9002:9000"  # S3 API
+      - "127.0.0.1:9003:9001"  # Console
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks: [internal]
+
+  api:
+    build:
+      context: ..
+      dockerfile: apps/api/Dockerfile
+    image: surco_health_api:latest
+    container_name: surco_api
+    restart: *restart
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis:    { condition: service_started }
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: "postgresql://surco:${DB_PASSWORD}@postgres:5432/surco_health?schema=public"
+      REDIS_URL: "redis://redis:6379"
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET requerido}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?JWT_REFRESH_SECRET requerido}
+      JWT_ACCESS_TTL: 15m
+      JWT_REFRESH_TTL: 30d
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:?ENCRYPTION_KEY requerido}
+      API_PORT: 4000
+      API_HOST: 0.0.0.0
+      WEB_BASE_URL: ${WEB_BASE_URL:-https://app.salud.surcoapp.tech}
+      CORS_ORIGINS: ${CORS_ORIGINS:-https://app.salud.surcoapp.tech}
+      WORKER_ENABLED: ${WORKER_ENABLED:-true}
+      # Storage (MinIO interno)
+      S3_ENDPOINT: http://minio:9000
+      S3_REGION: us-east-1
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY}
+      S3_SECRET_KEY: ${S3_SECRET_KEY}
+      S3_BUCKET: ${S3_BUCKET:-surco-health-files}
+      S3_FORCE_PATH_STYLE: "true"
+      # Telehealth / WhatsApp / Stripe — opcionales
+      DAILY_API_KEY: ${DAILY_API_KEY:-}
+      DAILY_DOMAIN: ${DAILY_DOMAIN:-}
+      WHATSAPP_TOKEN: ${WHATSAPP_TOKEN:-}
+      WHATSAPP_PHONE_NUMBER_ID: ${WHATSAPP_PHONE_NUMBER_ID:-}
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
+    ports:
+      - "127.0.0.1:4002:4000"
+    networks: [internal]
+
+  web:
+    build:
+      context: ..
+      dockerfile: apps/web/Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-https://api.salud.surcoapp.tech}
+        NEXT_PUBLIC_APP_DOMAIN: ${NEXT_PUBLIC_APP_DOMAIN:-app.salud.surcoapp.tech}
+    image: surco_health_web:latest
+    container_name: surco_web
+    restart: *restart
+    depends_on:
+      - api
+    environment:
+      NODE_ENV: production
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-https://api.salud.surcoapp.tech}
+      NEXT_PUBLIC_APP_DOMAIN: ${NEXT_PUBLIC_APP_DOMAIN:-app.salud.surcoapp.tech}
+    ports:
+      - "127.0.0.1:3002:3000"
+    networks: [internal]
+
+volumes:
+  surco_pgdata:    { name: surco_health_pgdata }
+  surco_redisdata: { name: surco_health_redisdata }
+  surco_miniodata: { name: surco_health_miniodata }
+
+networks:
+  internal:
+    name: surco_health_net
+    driver: bridge
