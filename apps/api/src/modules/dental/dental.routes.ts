@@ -36,4 +36,16 @@ export default async function dentalRoutes(app: FastifyInstance) {
     { preHandler: [authMiddleware, requireRole('CLINIC_OWNER', 'PROFESSIONAL')] },
     async (req) => svc.listProcedures(auditContextFromReq(req), req.params.patientId),
   );
+
+  app.patch<{ Params: { id: string }; Body: { status: string } }>(
+    '/procedures/:id/status',
+    { preHandler: [authMiddleware, requireRole('PROFESSIONAL', 'CLINIC_OWNER')] },
+    async (req, reply) => {
+      const { status } = req.body;
+      if (!['PLANNED', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED'].includes(status)) {
+        return reply.code(400).send({ error: 'INVALID_STATUS' });
+      }
+      return svc.updateProcedureStatus(auditContextFromReq(req), req.params.id, status as any);
+    },
+  );
 }

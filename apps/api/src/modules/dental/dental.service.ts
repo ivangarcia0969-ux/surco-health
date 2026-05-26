@@ -124,3 +124,28 @@ export async function listProcedures(ctx: AuditContext, patientId: string) {
     orderBy: { clinicalRecord: { createdAt: 'desc' } },
   });
 }
+
+export async function updateProcedureStatus(
+  ctx: AuditContext,
+  procedureId: string,
+  status: 'PLANNED' | 'IN_PROGRESS' | 'COMPLETED' | 'CANCELLED',
+) {
+  const proc = await prisma.dentalProcedure.findFirst({
+    where: { id: procedureId, clinicalRecord: { tenantId: ctx.tenantId } },
+  });
+  if (!proc) throw new AppError('PROCEDURE_NOT_FOUND', 404);
+
+  const updated = await prisma.dentalProcedure.update({
+    where: { id: procedureId },
+    data: {
+      status,
+      performedAt: status === 'COMPLETED' ? new Date() : null,
+    },
+  });
+
+  await logAudit({
+    ctx, action: 'UPDATE_PATIENT', entityType: 'DentalProcedure', entityId: procedureId,
+    metadata: { newStatus: status, toothNumber: proc.toothNumber },
+  });
+  return updated;
+}

@@ -8,6 +8,9 @@ import { Button } from '@/components/ui/Button';
 import { Odontogram, ConditionPalette, type Condition, type ChartState } from '@/components/clinical/Odontogram';
 import { ConsultationForm } from '@/components/clinical/ConsultationForm';
 import { EvolutionNoteForm } from '@/components/clinical/EvolutionNoteForm';
+import { SoapNoteForm } from '@/components/clinical/SoapNoteForm';
+import { PsychometricTestForm } from '@/components/clinical/PsychometricTestForm';
+import { DentalTreatmentPlan } from '@/components/clinical/DentalTreatmentPlan';
 import { calcAge, cn, formatDate, formatDateTime } from '@/lib/utils';
 import { useAuth } from '@/lib/auth-store';
 
@@ -59,7 +62,7 @@ interface ClinicalRecord {
   dentalProcedures?: any[];
 }
 
-type Tab = 'overview' | 'records' | 'odontogram' | 'vitals';
+type Tab = 'overview' | 'records' | 'odontogram' | 'dental-plan' | 'vitals';
 
 export default function PatientDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -115,6 +118,7 @@ export default function PatientDetailPage() {
           <TabBtn active={tab === 'overview'} onClick={() => setTab('overview')}>Resumen</TabBtn>
           <TabBtn active={tab === 'records'} onClick={() => setTab('records')}>HCE ({records.length})</TabBtn>
           <TabBtn active={tab === 'odontogram'} onClick={() => setTab('odontogram')}>Odontograma</TabBtn>
+          <TabBtn active={tab === 'dental-plan'} onClick={() => setTab('dental-plan')}>Plan dental</TabBtn>
           <TabBtn active={tab === 'vitals'} onClick={() => setTab('vitals')}>Signos vitales</TabBtn>
         </nav>
       </div>
@@ -122,6 +126,7 @@ export default function PatientDetailPage() {
       {tab === 'overview' && <OverviewTab patient={patient} />}
       {tab === 'records' && <RecordsTab records={records} patientId={patient.id} onSaved={load} />}
       {tab === 'odontogram' && <OdontogramTab patient={patient} onSaved={load} />}
+      {tab === 'dental-plan' && <DentalTreatmentPlan patientId={patient.id} />}
       {tab === 'vitals' && <VitalSignsTab patientId={patient.id} onSaved={load} />}
     </div>
   );
@@ -175,10 +180,14 @@ function RecordsTab({
   records, patientId, onSaved,
 }: { records: ClinicalRecord[]; patientId: string; onSaved: () => void }) {
   const role = useAuth((s) => s.user?.role);
+  const specialty = useAuth((s) => s.user?.specialty);
   const canCreate = role === 'PROFESSIONAL' || role === 'CLINIC_OWNER';
+  const isPsychology = specialty === 'PSYCHOLOGY' || specialty === 'PSYCHIATRY';
 
   const [openConsult, setOpenConsult] = useState(false);
   const [openEvolution, setOpenEvolution] = useState(false);
+  const [openSoap, setOpenSoap] = useState(false);
+  const [openTest, setOpenTest] = useState(false);
   const [filter, setFilter] = useState<string>('ALL');
 
   const filtered = filter === 'ALL' ? records : records.filter((r) => r.type === filter);
@@ -197,6 +206,16 @@ function RecordsTab({
           <Button variant="secondary" onClick={() => setOpenEvolution(true)}>
             + Nota de evolución
           </Button>
+          {(isPsychology || role === 'CLINIC_OWNER') && (
+            <>
+              <Button variant="secondary" onClick={() => setOpenSoap(true)}>
+                🧠 + Nota SOAP (psico)
+              </Button>
+              <Button variant="secondary" onClick={() => setOpenTest(true)}>
+                📊 + Test psicométrico
+              </Button>
+            </>
+          )}
         </div>
       )}
 
@@ -248,6 +267,18 @@ function RecordsTab({
           <EvolutionNoteForm
             open={openEvolution}
             onClose={() => setOpenEvolution(false)}
+            onCreated={onSaved}
+            patientId={patientId}
+          />
+          <SoapNoteForm
+            open={openSoap}
+            onClose={() => setOpenSoap(false)}
+            onCreated={onSaved}
+            patientId={patientId}
+          />
+          <PsychometricTestForm
+            open={openTest}
+            onClose={() => setOpenTest(false)}
             onCreated={onSaved}
             patientId={patientId}
           />
