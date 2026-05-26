@@ -6,15 +6,31 @@
 >
 > Este archivo vive en ambos repos (`Barbershop` y `surco-health`) y se mantiene sincronizado por Git para no perder contexto entre sesiones.
 
-## 🏁 HITO CRÍTICO — 2026-05-25 16:30
+## 🏁 HITOS POR FECHA
 
-✅ **Surco Health está VIVO en producción:**
+### 2026-05-25 16:30 — Surco Health LIVE en producción
 - https://api.salud.surcoapp.tech/health responde JSON
 - https://app.salud.surcoapp.tech/login funciona con login real
 - 5 containers Docker corriendo: `surco_postgres`, `surco_redis`, `surco_minio`, `surco_api`, `surco_web`
 - Caddy auto-HTTPS con certificados Let's Encrypt
 - Seed cargado con usuarios demo y 5 servicios clínicos
 - Coexiste sin afectar Karpos, Supabase, n8n, open-webui, Barbería
+
+### 2026-05-25 (más tarde) — Módulo Catálogo completo
+- **Commit:** `f24facc`
+- Backend: `/api/catalog/services` CRUD + soft-delete + filtros
+- Frontend: lista agrupada por especialidad con iconos, filtros chip, modal create/edit
+- Precio dual (Particular + EPS), badge CIE-10, control de acceso por rol
+
+### 2026-05-25 (más tarde) — HCE funcional y profesional
+- **Commit:** `7b2e5c9`
+- Backend: `listClinicalRecords` incluye `diagnoses`, `vitalSigns`, `dentalProcedures`
+- `ensureProfessionalCanAccessPatient` flexibilizado (cualquier profesional del tenant)
+- Frontend: 4 componentes clínicos nuevos:
+  - `Cie10Search`: autocomplete con multi-select de diagnósticos
+  - `ConsultationForm`: modal SOAP completo con firma electrónica
+  - `EvolutionNoteForm`: notas de seguimiento encriptadas
+  - `RecordCard`: badge por tipo, diagnósticos visibles, expand a detalle
 
 ---
 
@@ -311,6 +327,8 @@ docker compose -f infra/docker-compose.prod.yml --env-file .env exec api pnpm --
 | 7 | Caddy 404 en `/profesionales` y `/catalogo` | Sidebar referenciaba rutas sin página creada | Crear `apps/web/src/app/(app)/profesionales/page.tsx` y `/catalogo/page.tsx` | `e3f81ca` |
 | 8 | Caddy validate falla con "Unexpected next token after '{' on same line" | Caddyfile existente sin trailing newline → concatena con snippet | `printf '\n\n' >> Caddyfile` antes del `cat snippet >>` | en VPS al momento |
 | 9 | Caddy validate falla en linea 81 | `request_body { max_size 50MB }` inline no soportado en la versión de Caddy del VPS | Remover esa línea del snippet (default 10MB es suficiente para MVP) | `d0d594e` |
+| 10 | Next webpack: `the name Field is defined multiple times` | Conflicto al añadir `RecordField` inline en `pacientes/[id]/page.tsx` que ya tenía un `Field` del tab Resumen | Renombrar el nuevo a `RecordField` para no chocar | `7b2e5c9` |
+| 11 | HCE: profesional no puede crear consulta sin cita previa | `ensureProfessionalCanAccessPatient` exigía appointment previo, bloqueando urgencias y primeras consultas | Relajado: solo verifica que el paciente pertenezca al tenant; trazabilidad en audit log | `7b2e5c9` |
 
 ### Patterns NUEVOS aprendidos en Surco Health (aplicar siempre)
 
@@ -325,6 +343,20 @@ docker compose -f infra/docker-compose.prod.yml --env-file .env exec api pnpm --
 14. **Validar Prisma schema localmente ANTES de cualquier commit:** `cd packages/db && npx prisma validate`. Saca los errores de relación inversa y de preview features en segundos.
 
 15. **Ejecutar `pnpm install` y commitear `pnpm-lock.yaml` antes del primer push.** Sin lockfile, Dockerfile con `--frozen-lockfile` falla.
+
+16. **Nombrar componentes locales con prefijo `Record/Form/Patient...` para evitar colisiones.** Páginas largas (>500 líneas) ya tienen helpers como `Field`, `Stat`. Cualquier subcomponente nuevo debe llevar prefijo del dominio (`RecordField`, `VitalsField`, `PatientCard`).
+
+17. **`ensureXCanAccessY` debe ser permisivo dentro del tenant, restrictivo entre tenants.** La trazabilidad va al audit log. NO bloquear flujos legítimos como urgencias o primera vez sin cita.
+
+18. **Modal con secciones colapsables visualmente separadas** para formularios SOAP/HCE largos:
+    - Cada sección con icono + título + subtítulo
+    - Border-bottom de separación
+    - Tamaño `size="xl"` del Modal (no `lg`)
+    - Esto se vuelve patrón base para SOAP psicología, anamnesis pediátrica, etc.
+
+19. **Default sensible para "firmar ahora"**: marcado por defecto al cerrar consulta. La mayoría firma al terminar; los borradores son la excepción.
+
+20. **Filtros chip con conteo `[Todos (10)]` en listas largas** vuelve la UI 10x más usable que un dropdown estático.
 
 ### Patterns que SE TRAJERON de Barbería a Surco Health desde el inicio (evitar repetir)
 
@@ -430,13 +462,14 @@ docker compose -f infra/docker-compose.prod.yml --env-file .env up -d api web
 
 | Métrica | Barbería | Surco Health |
 |---|---|---|
-| Commits | ~14 | 11 |
-| Archivos | ~140 | ~120 |
-| Líneas de código | ~10,500 | ~9,500 |
+| Commits | ~14 | **13** |
+| Archivos | ~140 | ~127 |
+| Líneas de código | ~10,500 | **~11,000** |
 | Modelos Prisma | 15 | 28 |
-| Módulos REST | 14 | **10** (auth, tenants, users, patients, appointments, clinical, dental, medical, psychology, **catalog**) |
-| Endpoints REST | ~80 | ~60 |
+| Módulos REST | 14 | **10** (auth, tenants, users, patients, appointments, clinical, dental, medical, psychology, catalog) |
+| Endpoints REST | ~80 | ~65 |
 | Pantallas frontend | 16 | **10** (landing, login, register, dashboard, agenda, pacientes, paciente/[id], profesionales, catalogo, ajustes) |
+| Componentes clínicos reutilizables | — | **5** (Odontogram, Cie10Search, ConsultationForm, EvolutionNoteForm, RecordCard) |
 | Verticales soportados | 1 (barbería) | 5 (dental, médico, psico, pediatría, estética) |
 | Compliance LATAM | — | 6 normas (Habeas Data, Res 1995, Res 866, Ley 527, NOM-024, HIPAA) |
 | En producción | Casi (faltan 7 cmds) | ✅ **SÍ** (app.salud.surcoapp.tech) |
@@ -450,20 +483,23 @@ docker compose -f infra/docker-compose.prod.yml --env-file .env up -d api web
 ### ✅ Completado en esta sesión
 - ~~Deploy Surco Health al VPS~~ ✓ Vivo en `app.salud.surcoapp.tech` y `api.salud.surcoapp.tech`
 - ~~Páginas `/profesionales` y `/catalogo`~~ ✓ Funcionando
-- ~~Módulo catalog completo con CRUD~~ ✓ Backend + frontend listos (commit `f24facc`)
+- ~~Módulo catalog completo con CRUD~~ ✓ Backend + frontend (`f24facc`)
+- ~~**HCE funcional: ConsultationForm + EvolutionNote + Cie10Search + RecordCard**~~ ✓ (`7b2e5c9`)
+- ~~Backend `listClinicalRecords` con diagnoses/vitalSigns/dentalProcedures incluidos~~ ✓
+- ~~`ensureProfessionalCanAccessPatient` flexibilizado para urgencias~~ ✓
 
 ### Inmediato (siguiente sesión)
-1. **Surco Health:** rebuild api+web tras commit `f24facc` para activar el módulo catalog en producción
+1. **Surco Health:** rebuild api+web tras commit `7b2e5c9` para activar HCE funcional en producción
 2. **Barbería:** terminar los últimos 7 comandos para tener HTTPS público en `app.barber.surcoapp.tech`
 
 ### Corto plazo (features clínicos faltantes)
-3. **Frontend Consulta médica completa** — flujo "Atender" desde agenda con anamnesis + CIE-10 + diagnóstico + plan
-4. **Frontend Notas SOAP psicológicas** (backend ya está, solo falta UI)
-5. **Frontend Aplicar test psicométrico** (PHQ-9, GAD-7, BDI-II — backend ya está)
-6. **Subida de archivos clínicos** a MinIO + visor de radiografías (backend MinIO está vivo en `surco_minio`)
-7. **Recetas médicas con firma + link a MIPRES Colombia**
-8. **Consentimientos informados digitales** con firma canvas
-9. **Página de gastos** (módulo administrativo)
+3. **Frontend Notas SOAP psicológicas** (backend ya está en `psychology.routes.ts`, falta UI con encriptación visible)
+4. **Frontend Aplicar test psicométrico** (PHQ-9, GAD-7, BDI-II — backend `applyTest` ya calcula score + interpretación + flags)
+5. **Subida de archivos clínicos** a MinIO + visor de radiografías
+6. **Recetas médicas con firma + link a MIPRES Colombia**
+7. **Consentimientos informados digitales** con firma canvas
+8. **Página de gastos** (módulo administrativo)
+9. **Atender desde agenda** — botón "Atender" en cita que abre ConsultationForm con `appointmentId` precargado
 
 ### Configuración / activación de servicios externos
 10. **WhatsApp Cloud API:** sacar token de Meta Business y configurar en `.env`
