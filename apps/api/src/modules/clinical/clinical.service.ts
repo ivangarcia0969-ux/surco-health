@@ -14,21 +14,23 @@ function contentHash(content: unknown): string {
   return createHash('sha256').update(JSON.stringify(content)).digest('hex');
 }
 
-/** El profesional solo puede registrar HCE para SUS pacientes (los que atendió en citas) */
+/**
+ * El profesional puede registrar HCE para cualquier paciente del tenant.
+ * (Antes restringía solo a quienes habían tenido cita con él; eso bloqueaba
+ * casos legítimos como urgencias, primera vez sin cita previa, etc.)
+ * La trazabilidad queda en el audit log + en el campo professionalId del registro.
+ */
 async function ensureProfessionalCanAccessPatient(
   tx: Prisma.TransactionClient,
   tenantId: string,
-  professionalId: string,
+  _professionalId: string,
   patientId: string,
 ) {
-  const everSawIt = await tx.appointment.findFirst({
-    where: { tenantId, professionalId, patientId },
+  const patient = await tx.patient.findFirst({
+    where: { id: patientId, tenantId, isActive: true },
     select: { id: true },
   });
-  if (!everSawIt) {
-    // En clínicas pequeñas el owner puede dar acceso. Por ahora denegamos.
-    throw new AppError('PATIENT_NOT_ASSIGNED', 403);
-  }
+  if (!patient) throw new AppError('PATIENT_NOT_FOUND', 404);
 }
 
 export async function createConsultation(
@@ -167,7 +169,14 @@ export async function listClinicalRecords(
     orderBy: { createdAt: 'desc' },
     include: {
       professional: { select: { id: true, fullName: true, specialty: true } },
-      // Las relaciones específicas se cargan a demanda al ver detalle
+      diagnoses: {
+        select: { id: true, icd10Code: true, description: true, isPrimary: true, type: true },
+        orderBy: [{ isPrimary: 'desc' }, { createdAt: 'asc' }],
+      },
+      vitalSigns: true,
+      dentalProcedures: {
+        select: { id: true, toothNumber: true, surfaces: true, condition: true, treatment: true, status: true },
+      },
     },
   });
 
