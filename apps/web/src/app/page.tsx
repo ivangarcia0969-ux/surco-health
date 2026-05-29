@@ -9,7 +9,8 @@ export default function HomePage() {
       </h1>
       <p className="max-w-2xl text-lg text-gray-600">
         Historia clínica electrónica, agenda y pacientes — diseñado para clínicas dentales,
-        psicológicas y médicas en LATAM. Cumple Habeas Data, Resolución 1995/1999 y exporta a FHIR.
+        psicológicas y médicas en LATAM. Implementa los lineamientos de Habeas Data y Resolución
+        1995/1999 (Colombia) y exporta a FHIR R4.
       </p>
 
       <div className="flex flex-col gap-3 sm:flex-row">
@@ -30,14 +31,15 @@ export default function HomePage() {
                  body="Anamnesis, signos vitales y diagnóstico CIE-10 con autocompletar." />
         <Feature icon="📅" title="Agenda multi-profesional"
                  body="Cada profesional gestiona su agenda. Sin choques de horario." />
-        <Feature icon="💬" title="Recordatorios WhatsApp"
-                 body="Reduce no-show con mensajes automáticos 24h antes." />
-        <Feature icon="🔒" title="Compliance LATAM"
-                 body="Habeas Data, Res 1995/1999, audit log append-only, retención 15 años." />
+        <Feature icon="💬" title="WhatsApp Business multi-bot"
+                 body="Conecta uno o varios números de Meta para enviar mensajes desde la app (disponible desde plan Pro)." />
+        <Feature icon="🔒" title="Compliance Habeas Data"
+                 body="Habeas Data Ley 1581/2012, HCE append-only con adendas (Res 1995/1999) y audit log de accesos." />
       </div>
 
       <p className="pt-8 text-xs text-gray-500">
-        Diseñado en Colombia · Cumple normativas Colombia, México, Argentina, Chile y Perú
+        Diseñado en Colombia · Compliance Colombia certificado · Soporte multi-país México,
+        Argentina, Chile y Perú (homologación normativa local en proceso)
       </p>
     </main>
   );

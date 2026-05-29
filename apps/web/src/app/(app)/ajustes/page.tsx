@@ -5,6 +5,7 @@ import { Card, CardTitle } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Input, Select } from '@/components/ui/Input';
 import { formatDate, SPECIALTY_LABEL } from '@/lib/utils';
+import { WhatsappAccountsManager } from '@/components/settings/WhatsappAccountsManager';
 
 interface TenantMe {
   id: string;
@@ -53,6 +54,7 @@ export default function SettingsPage() {
 
       <BusinessProfile tenant={tenant} onSaved={load} />
       <PlanInfo tenant={tenant} usage={usage} />
+      {usage.plan.whatsappEnabled && <WhatsappAccountsManager />}
     </div>
   );
 }

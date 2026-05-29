@@ -3,13 +3,19 @@ import { randomBytes, createHash } from 'crypto';
 import { env } from '../config/env';
 import type { AuthContext } from '@surco/shared';
 
+// JWT_ALG fijo en HS256 — explicitar previene "alg: none" attack y migración accidental
+const JWT_ALG = 'HS256' as const;
+
 export function signAccessToken(payload: AuthContext): string {
-  const opts: SignOptions = { expiresIn: env.JWT_ACCESS_TTL as SignOptions['expiresIn'] };
+  const opts: SignOptions = {
+    expiresIn: env.JWT_ACCESS_TTL as SignOptions['expiresIn'],
+    algorithm: JWT_ALG,
+  };
   return jwt.sign(payload, env.JWT_SECRET, opts);
 }
 
 export function verifyAccessToken(token: string): AuthContext {
-  return jwt.verify(token, env.JWT_SECRET) as AuthContext;
+  return jwt.verify(token, env.JWT_SECRET, { algorithms: [JWT_ALG] }) as AuthContext;
 }
 
 export function generateRefreshToken(): { token: string; hash: string } {

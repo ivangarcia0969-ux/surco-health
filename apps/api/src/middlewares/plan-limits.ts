@@ -60,8 +60,10 @@ export async function enforceMonthlyAppointmentsLimit(req: FastifyRequest, reply
   }
 }
 
-/** Gate feature por plan (telehealth, FE, FHIR export, etc.) */
-export function requirePlanFeature(feature: 'telehealth' | 'electronicInvoice' | 'fhirExport' | 'multiSite') {
+/** Gate feature por plan (telehealth, FE, FHIR export, WhatsApp, etc.) */
+export function requirePlanFeature(
+  feature: 'telehealth' | 'electronicInvoice' | 'fhirExport' | 'multiSite' | 'whatsapp',
+) {
   return async (req: FastifyRequest, reply: FastifyReply) => {
     if (!req.auth.tenantId) return;
     const tenant = await prisma.tenant.findUnique({
@@ -74,7 +76,8 @@ export function requirePlanFeature(feature: 'telehealth' | 'electronicInvoice' |
       (feature === 'telehealth' && tenant.plan.telehealthEnabled) ||
       (feature === 'electronicInvoice' && tenant.plan.electronicInvoiceEnabled) ||
       (feature === 'fhirExport' && tenant.plan.fhirExportEnabled) ||
-      (feature === 'multiSite' && tenant.plan.multiSiteEnabled);
+      (feature === 'multiSite' && tenant.plan.multiSiteEnabled) ||
+      (feature === 'whatsapp' && tenant.plan.whatsappEnabled);
 
     if (!enabled) {
       return reply.code(402).send({

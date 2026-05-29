@@ -177,17 +177,19 @@ export async function buildFhirCompositionFromRecord(ctx: AuditContext, recordId
   return buildFhirComposition(rec);
 }
 
-/** Observation desde VitalSigns */
-export async function buildFhirObservationFromVitals(ctx: AuditContext, recordId: string) {
-  const rec = await prisma.clinicalRecord.findFirst({
-    where: { id: recordId, tenantId: ctx.tenantId },
-    include: { vitalSigns: true, professional: true },
-  });
-  if (!rec?.vitalSigns) throw new AppError('VITALS_NOT_FOUND', 404);
-
-  const vs = rec.vitalSigns;
+/**
+ * Construye un Observation FHIR a partir de un VitalSigns YA cargado.
+ * Versión pura — no toca BD ni audita. Usar dentro de loops que ya tienen
+ * los datos precargados (ej. $everything).
+ */
+function vitalsToObservation(
+  vs: NonNullable<Awaited<ReturnType<typeof prisma.clinicalRecord.findFirst>> & {
+    vitalSigns: any;
+    professional: any;
+  }>['vitalSigns'],
+  rec: { id: string; patientId: string; professionalId: string; professional?: { fullName?: string | null } | null },
+) {
   const components: any[] = [];
-
   if (vs.systolicMmHg && vs.diastolicMmHg) {
     components.push({
       code: { coding: [{ system: 'http://loinc.org', code: '85354-9', display: 'Blood pressure panel' }] },
@@ -229,11 +231,6 @@ export async function buildFhirObservationFromVitals(ctx: AuditContext, recordId
     });
   }
 
-  await logAudit({
-    ctx, action: 'EXPORT_FHIR', entityType: 'VitalSigns', entityId: vs.id,
-    metadata: { resourceType: 'Observation' },
-  });
-
   return {
     resourceType: 'Observation',
     id: vs.id,
@@ -249,7 +246,29 @@ export async function buildFhirObservationFromVitals(ctx: AuditContext, recordId
   };
 }
 
-/** Bundle $everything del paciente — HCE consolidada FHIR R4 */
+/** Observation desde VitalSigns (entrypoint público con audit + lookup) */
+export async function buildFhirObservationFromVitals(ctx: AuditContext, recordId: string) {
+  const rec = await prisma.clinicalRecord.findFirst({
+    where: { id: recordId, tenantId: ctx.tenantId },
+    include: { vitalSigns: true, professional: true },
+  });
+  if (!rec?.vitalSigns) throw new AppError('VITALS_NOT_FOUND', 404);
+
+  await logAudit({
+    ctx, action: 'EXPORT_FHIR', entityType: 'VitalSigns', entityId: rec.vitalSigns.id,
+    metadata: { resourceType: 'Observation' },
+  });
+
+  return vitalsToObservation(rec.vitalSigns, rec);
+}
+
+/** Bundle $everything del paciente — HCE consolidada FHIR R4.
+ *
+ * FIX N+1 (auditoría 2026-05-28): el bucle ahora reusa los `vitalSigns`
+ * y `professional` ya cargados en el findMany outer, en lugar de invocar
+ * `buildFhirObservationFromVitals` (que hace un findFirst extra por record).
+ * Antes: 1 + 2N queries. Ahora: 2 queries para todo el Bundle.
+ */
 export async function buildPatientEverything(ctx: AuditContext, patientId: string) {
   const patient = await prisma.patient.findFirst({
     where: { id: patientId, tenantId: ctx.tenantId },
@@ -274,7 +293,13 @@ export async function buildPatientEverything(ctx: AuditContext, patientId: strin
     entries.push({ resource: comp, fullUrl: `Composition/${comp.id}` });
 
     if (rec.vitalSigns) {
-      const obs = await buildFhirObservationFromVitals(ctx, rec.id);
+      // Reusar datos ya cargados — cero queries extras
+      const obs = vitalsToObservation(rec.vitalSigns, {
+        id: rec.id,
+        patientId: rec.patientId,
+        professionalId: rec.professionalId,
+        professional: rec.professional,
+      });
       entries.push({ resource: obs, fullUrl: `Observation/${obs.id}` });
     }
   }

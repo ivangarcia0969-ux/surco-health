@@ -2,11 +2,81 @@
 
 > **Documento maestro** que captura todo el trabajo realizado, decisiones tomadas, infraestructura y status de los proyectos SaaS de Iván García.
 >
-> **Última actualización:** 2026-05-25 (Surco Health desplegado en producción 🎊)
+> **Última actualización:** 2026-05-28 (FASES 0/1/2 ejecutadas tras auditoría — apto para marketing controlado ✅)
 >
 > Este archivo vive en ambos repos (`Barbershop` y `surco-health`) y se mantiene sincronizado por Git para no perder contexto entre sesiones.
 
 ## 🏁 HITOS POR FECHA
+
+### 2026-05-28 (cont.) — FASE 2: bloqueadores medium post-auditoría
+- **Pendiente commit** (este turno)
+- **N+1 FHIR resuelto** — `buildPatientEverything` ahora reusa `vitalSigns` y `professional` ya cargados en lugar de re-fetch. Antes 1+2N queries por paciente, ahora 2 queries para todo el Bundle. Función pura `vitalsToObservation()` extraída.
+- **Endpoint individual de HCE** — `GET /api/clinical/records/:id` con `READ_CLINICAL_RECORD` audit log. Cumple Res 1995/1999 Art. 9 (rastreo de consultas a HCE). Filtra por professionalId si rol=PROFESSIONAL. Bloquea registros `isLocked` excepto al creador u OWNER.
+- **Flujo ARCO Surco** — modelo `ArcoRequest` + `apps/api/src/modules/arco/` con CRUD (crear, listar, resolver) + endpoint de portabilidad `GET /api/arco/patients/:id/export` (Bundle FHIR). Plazo legal 15 días hábiles tracked. Modelo `Patient.arcoRequests` back-relation.
+- **Stock atómico Barbería** — `sales.service.ts` reemplaza bucle secuencial `update` por `$executeRaw` con `CASE WHEN` en una sola query. Con 10 productos: de 10 round-trips serializados → 1 round-trip.
+- **Worker Barbería separado** — container `saas_barberias_worker` en `docker-compose.prod.yml` con `WORKER_ENABLED=true`. El `api` ahora corre con `WORKER_ENABLED=false` para no procesar jobs.
+- **AuditLog Barbería** — modelo nuevo + helper `utils/audit.ts` + integración en login (LOGIN_SUCCESS / LOGIN_FAILURE con razón y IP/userAgent). Post-deploy SQL con trigger inmutable + EXCLUDE constraint + GIN trgm idéntico a Surco.
+- **Tuning compose Barbería** — Postgres `shared_buffers=512MB`/`work_mem=12MB`, Redis `maxmemory=192mb noeviction`, JWT_REFRESH_TTL 14d, `connection_limit=15`, `mem_limit`/`cpus` por servicio, healthcheck Docker API.
+- **PWA real** — iconos SVG escalables (`icon.svg`) en ambas apps + manifest.json actualizado (`scope`, `categories`, `purpose: maskable`). Los placeholders rotos del manifest original que el auditor detectó están eliminados.
+
+### 2026-05-28 — Auditoría completa pre-venta masiva + FASES 0/1 ejecutadas
+- **Pendiente commit** (este turno)
+- **Auditoría** ejecutada por 4 agentes especializados (features Surco, features Barbería, escalabilidad, seguridad/compliance). Veredicto:
+  - 🚨 6 promesas FALSAS o INCUMPLIDAS detectadas (worker WhatsApp Surco inexistente, "Funciona offline" Barbería falso, trigger AuditLog no aplicado en prod, booking público sin Habeas Data, solo 10 códigos CIE-10, footer multi-país sin sustento)
+  - 🔴 12 bloqueadores técnicos de escala (pool conexiones default, sin cache auth, sin backups Surco, rate limit por IP, sin tuning Postgres, N+1 en FHIR, leak Stripe IDs, etc.)
+  - Riesgo legal estimado pre-fix: $200M-$3.500M COP por incidente
+- **FASE 0** (legal inmediato): copy del landing corregido en ambas apps ("Funciona offline" → "Optimizado para móvil"; "Cumple normativas LATAM" → "Colombia certificado · resto en homologación"; tarjeta WhatsApp Surco aclarada como "Disponible desde plan Pro"). Checkbox Habeas Data obligatorio en booking público Barbería + persistencia `privacyAcceptedAt/Version/Source` en Client. Páginas `/legal/privacidad` y `/legal/terminos` creadas en ambos webs (Habeas Data Ley 1581/2012 + Res 1995/1999 + ARCO + retención 15 años).
+- **FASE 1** (bloqueadores críticos):
+  - **Trigger AuditLog inmutable** movido a `infra/sql/post-deploy.sql` (corre DESPUÉS de `prisma db push`). El init script anterior corría antes y nunca aplicaba. Ahora deploy.sh aborta si falla.
+  - **EXCLUDE constraint anti-doble-booking** con `tstzrange + gist` en Appointment.
+  - **GIN indexes `pg_trgm`** sobre `Patient.fullName` y `Patient.document` (búsqueda <100ms con 50k pacientes).
+  - **Worker BullMQ Surco** implementado completo: `apps/api/src/worker.ts` + `modules/notifications/{queue,reminder-worker,reminder-sweeper}.ts`. Container `surco_worker` separado en compose. Routing por sede + sweeper cada 10min para recovery. Idempotente (jobId).
+  - **Importador CIE-10 Minsalud** (`db:seed:icd10`) con ~14k códigos desde `datos.gov.co`. Integrado en `deploy.sh` si BD tiene <1000 códigos.
+  - **Backups Surco** (clonando patrón Barbería) — `infra/scripts/backup.sh` + `restore.sh` con dump pg_dump custom-format + MinIO tar + copia de ENCRYPTION_KEY local.
+  - **Cache Redis para auth middleware** (`plugins/redis.ts`, TTL 60s). Reduce 90% queries del path crítico.
+  - **Healthcheck real /health** chequea Postgres + Redis. Docker healthcheck wire'd.
+  - **Rate limit por tenantId** (no IP) en ambas apps.
+  - **CORS validation hardening** (rechaza `evilroot.com` aunque root sea `root.com`) en ambas.
+  - **JWT algorithm restringido a HS256 explícitamente** (previene `alg: none` attack) en ambas.
+  - **bcrypt cost 10 → 12** en ambas.
+  - **GET /tenants/me omite Stripe IDs** para roles no-owner en ambas.
+  - **docker-compose tuning**: Postgres `shared_buffers=1GB`, `effective_cache_size=3GB`, `work_mem=16MB`, `max_connections=150`. Redis `maxmemory=256mb` con `noeviction` (jobs delayed son críticos). `mem_limit/cpus` por servicio. JWT_REFRESH_TTL 30d → 14d. Connection limit Prisma `?connection_limit=15&pool_timeout=20`.
+
+### 2026-05-25 (final) — FASE 6: Multi-bot WhatsApp per tenant (marketplace-ready)
+- **Pendiente commit** (este turno) — supersedes FASE 5
+- **Driver de negocio:** "vender el SaaS muchas veces" + cadenas/franquicias necesitan N bots
+- **Schema nuevo:** modelo `WhatsappAccount` (1..N por Tenant)
+  - `id`, `tenantId`, `name`, `displayPhone`, `phoneNumberId UNIQUE`, `businessAccountId`, `accessToken Bytes` (pgcrypto)
+  - Routing: `isDefault` Boolean + `siteId String?` (asociar a sede)
+  - Status: `verified`, `lastTestAt`, `isActive`
+  - Quota: `monthlySent`, `monthResetAt`
+- **Cuotas por plan** (campo `Plan.maxWhatsappAccounts`):
+  - FREE: 1 bot · PRO: 2 bots · CLINICA: 5 bots · ENTERPRISE: 50 bots
+- **Endpoints REST** `/api/whatsapp/accounts`:
+  - `GET` lista con capacity (plan + cuota usada)
+  - `POST` crear (gateado por cuota — 402 si excede)
+  - `PATCH /:id` editar / rotar token (token rotado → verified=false)
+  - `POST /:id/default` marcar como principal (transacción que limpia el anterior)
+  - `POST /:id/test` envío de prueba a Meta Graph v22
+  - `DELETE /:id` eliminar (si era default, promueve al siguiente)
+- **Routing del worker** (`resolveAccountForSend`): siteId → bot del site → bot default → null (SKIPPED_NO_BOT)
+- **UI nueva** `WhatsappAccountsManager.tsx`:
+  - Lista de cards con badge Principal / Verificado / Pausado + cuota visible (barra)
+  - Modal Crear/Editar con todos los campos + asociación a sede
+  - Botón "Probar" por bot (envía hello_world)
+  - Empty state si no hay bots con CTA "Conectar primer bot"
+- **Portabilidad futura:** lógica Meta aislada en `callMetaGraph()` — mover a microservicio standalone = ~30 min cuando justifique
+- **FASE 5 revertida** (los 5 campos del Tenant nunca llegaron a producción)
+
+### 2026-05-25 (intermedio) — FASE 5 (REVERTIDA): WhatsApp config 1-por-tenant
+- Implementación 1:1 reemplazada por FASE 6 antes del commit. Sin impacto en producción.
+
+### 2026-05-25 17:30 — FASES 1-4 completas (todas desplegadas)
+- **Commit:** `244f812`
+- **FASE 1 — FHIR R4 export**: `apps/api/src/modules/fhir/` con `CapabilityStatement`, `Patient/:id`, `Patient/:id/$everything` (Bundle), `Composition/:id`, `Observation/:id`. Content-Type `application/fhir+json`. Gateado por `fhirExport` (plan CLINICA+). Verificado en producción: `/metadata` responde JSON FHIR v4.0.1.
+- **FASE 2 — UI Tests psicométricos**: `PsychometricTestForm.tsx` con selector PHQ-9/GAD-7/BDI-II, preguntas en español, scale buttons, progress bar, live score, flags `SUICIDAL_IDEATION` y `HIGH_SEVERITY`.
+- **FASE 3 — UI Notas SOAP**: `SoapNoteForm.tsx` con 5 secciones (S/O/A/P + Risk), niveles NONE/LOW/MEDIUM/HIGH/IMMINENT, plan de seguridad obligatorio para HIGH/IMMINENT, banner de confidencialidad, firma SHA-256.
+- **FASE 4 — Plan dental**: `DentalTreatmentPlan.tsx` con 4 KPI cards (procedimientos, total, cobrado, pendiente), filtros chip por estado, tabla con costo+estado+acciones, footer con total. Endpoint `PATCH /api/dental/procedures/:id/status` agregado.
 
 ### 2026-05-25 16:30 — Surco Health LIVE en producción
 - https://api.salud.surcoapp.tech/health responde JSON

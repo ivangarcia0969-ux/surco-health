@@ -186,3 +186,60 @@ export async function listClinicalRecords(
   });
   return records;
 }
+
+/**
+ * Lectura individual de HCE — Res 1995/1999 Art. 9 exige rastrear "todas las
+ * consultas a la historia clínica". Cada lectura queda registrada con actor,
+ * IP, userAgent, recordId.
+ *
+ * Si el actor es PROFESSIONAL, solo puede leer registros donde él es el
+ * profesional tratante (excepto OWNER que tiene visibilidad total).
+ */
+export async function getClinicalRecord(
+  ctx: AuditContext, role: UserRole, recordId: string,
+) {
+  const where: Prisma.ClinicalRecordWhereInput = {
+    id: recordId,
+    tenantId: ctx.tenantId,
+  };
+  if (role === 'PROFESSIONAL') where.professionalId = ctx.actorId!;
+
+  const record = await prisma.clinicalRecord.findFirst({
+    where,
+    include: {
+      professional: { select: { id: true, fullName: true, specialty: true } },
+      patient: { select: { id: true, fullName: true, documentId: true } },
+      diagnoses: {
+        orderBy: [{ isPrimary: 'desc' }, { createdAt: 'asc' }],
+      },
+      vitalSigns: true,
+      dentalProcedures: true,
+      previousRecord: {
+        select: { id: true, version: true, signedAt: true, professional: { select: { fullName: true } } },
+      },
+      amendments: {
+        select: { id: true, version: true, signedAt: true, professional: { select: { fullName: true } } },
+        orderBy: { version: 'asc' },
+      },
+    },
+  });
+  if (!record) throw new AppError('RECORD_NOT_FOUND', 404);
+
+  // Notas SOAP psicológicas con isLocked solo se leen por el creador o OWNER
+  if (record.isLocked && record.professionalId !== ctx.actorId && role !== 'CLINIC_OWNER') {
+    throw new AppError('FORBIDDEN_LOCKED_RECORD', 403);
+  }
+
+  await logAudit({
+    ctx, action: 'READ_CLINICAL_RECORD', entityType: 'ClinicalRecord',
+    entityId: record.id,
+    metadata: {
+      patientId: record.patientId,
+      recordType: record.type,
+      version: record.version,
+      isAmendment: !!record.previousRecordId,
+    },
+  });
+
+  return record;
+}

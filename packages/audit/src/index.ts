@@ -36,6 +36,8 @@ export type AuditAction =
   // Admin
   | 'CREATE_USER' | 'DISABLE_USER' | 'CHANGE_USER_ROLE'
   | 'OVERRIDE_TENANT_PLAN'
+  // Notificaciones
+  | 'SEND_NOTIFICATION' | 'SKIP_NOTIFICATION' | 'NOTIFICATION_FAILED'
   // Otros
   | string;
 

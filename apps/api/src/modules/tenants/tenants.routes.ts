@@ -6,7 +6,7 @@ import * as svc from './tenants.service';
 
 export default async function tenantsRoutes(app: FastifyInstance) {
   app.get('/me', { preHandler: [authMiddleware] }, async (req) =>
-    svc.getMyTenant(req.auth.tenantId!),
+    svc.getMyTenant(req.auth.tenantId!, req.auth.role),
   );
 
   app.patch('/me', { preHandler: [authMiddleware, requireRole('CLINIC_OWNER')] }, async (req, reply) => {

@@ -2,13 +2,26 @@ import { prisma } from '../../plugins/prisma';
 import { AppError } from '../../utils/errors';
 import type { UpdateTenantInput, CreateSiteInput, CreateRoomInput } from '@surco/shared';
 
-export async function getMyTenant(tenantId: string) {
+/**
+ * Devuelve la info del tenant. Si `role` no es CLINIC_OWNER ni SAAS_ADMIN,
+ * OMITE campos sensibles (Stripe IDs, etc.) — defensa contra phishing.
+ */
+export async function getMyTenant(tenantId: string, role?: string | null) {
   const tenant = await prisma.tenant.findUnique({
     where: { id: tenantId },
     include: { plan: true },
   });
   if (!tenant) throw new AppError('TENANT_NOT_FOUND', 404);
-  return tenant;
+
+  // Owner y SaaS admin ven todo
+  if (role === 'CLINIC_OWNER' || role === 'SAAS_ADMIN') {
+    return tenant;
+  }
+
+  // Roles no-owner: omitir IDs de Stripe + datos tributarios sensibles
+  const { stripeCustomerId, stripeSubscriptionId, stripeSubscriptionStatus, taxId, ...safe } =
+    tenant;
+  return safe;
 }
 
 export async function updateMyTenant(tenantId: string, input: UpdateTenantInput) {

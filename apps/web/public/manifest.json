@@ -1,11 +1,27 @@
 {
   "name": "Surco Health",
   "short_name": "Surco",
-  "description": "SaaS para consultorios médicos, dentales y psicológicos",
+  "description": "Historia clínica electrónica, agenda y pacientes para consultorios médicos, dentales y psicológicos en LATAM",
   "start_url": "/",
+  "scope": "/",
   "display": "standalone",
   "background_color": "#f9fafb",
-  "theme_color": "#3b6bff",
+  "theme_color": "#5b6cff",
   "orientation": "portrait",
-  "lang": "es"
+  "lang": "es",
+  "categories": ["medical", "health", "productivity"],
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
+    }
+  ]
 }

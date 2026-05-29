@@ -17,6 +17,13 @@ export default async function clinicalRoutes(app: FastifyInstance) {
     },
   );
 
+  // Lectura individual con audit log obligatorio (Res 1995/1999 Art. 9)
+  app.get<{ Params: { id: string } }>(
+    '/records/:id',
+    { preHandler: [authMiddleware, requireRole('CLINIC_OWNER', 'PROFESSIONAL')] },
+    async (req) => svc.getClinicalRecord(auditContextFromReq(req), req.auth.role, req.params.id),
+  );
+
   app.post(
     '/consultations',
     { preHandler: [authMiddleware, requireRole('PROFESSIONAL', 'CLINIC_OWNER')] },

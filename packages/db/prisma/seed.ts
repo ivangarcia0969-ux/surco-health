@@ -16,6 +16,7 @@ async function main() {
         priceMonthlyUsd: 0,
         maxProfessionals: 1, maxAppointmentsPerMonth: 30, maxStorageGb: 1,
         whatsappEnabled: true, whatsappMonthlyLimit: 50,
+        maxWhatsappAccounts: 1,
       },
     }),
     prisma.plan.upsert({
@@ -26,6 +27,7 @@ async function main() {
         priceMonthlyUsd: 29,
         maxProfessionals: 5, maxAppointmentsPerMonth: 1000, maxStorageGb: 5,
         whatsappEnabled: true, whatsappMonthlyLimit: 2000,
+        maxWhatsappAccounts: 2,
         telehealthEnabled: true,
         electronicInvoiceEnabled: true,
       },
@@ -38,6 +40,7 @@ async function main() {
         priceMonthlyUsd: 49,
         maxProfessionals: 20, maxStorageGb: 50,
         whatsappEnabled: true,
+        maxWhatsappAccounts: 5,
         telehealthEnabled: true,
         electronicInvoiceEnabled: true,
         fhirExportEnabled: true,
@@ -53,6 +56,7 @@ async function main() {
         priceMonthlyUsd: 199,
         maxProfessionals: 200, maxStorageGb: 500,
         whatsappEnabled: true,
+        maxWhatsappAccounts: 50, // marketplace-ready
         telehealthEnabled: true,
         electronicInvoiceEnabled: true,
         fhirExportEnabled: true,

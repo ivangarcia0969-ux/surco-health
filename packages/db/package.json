@@ -16,7 +16,8 @@
     "lint": "echo 'no lint'",
     "type-check": "tsc --noEmit",
     "prisma": "prisma",
-    "db:seed": "tsx prisma/seed.ts"
+    "db:seed": "tsx prisma/seed.ts",
+    "db:seed:icd10": "tsx prisma/seed-icd10.ts"
   },
   "dependencies": {
     "@prisma/client": "^5.20.0"

@@ -3,9 +3,25 @@ import { prisma } from '../../plugins/prisma';
 import { hasCollision } from './collision';
 import { AppError } from '../../utils/errors';
 import { logAudit, type AuditContext } from '@surco/audit';
+import { enqueueReminder, cancelReminder } from '../notifications/queue';
+import { env } from '../../config/env';
 import type {
   CreateAppointmentInput, UpdateAppointmentInput, ListAppointmentsQuery, UserRole,
 } from '@surco/shared';
+
+/**
+ * Best-effort: encolar el recordatorio cuando una cita está confirmada.
+ * No bloquea la creación si Redis está caído — el sweeper lo recupera después.
+ */
+async function tryEnqueueReminder(appointmentId: string, tenantId: string, startsAt: Date) {
+  try {
+    if (!env.REDIS_URL) return; // dev sin Redis — sweeper tampoco corre
+    const remindAt = new Date(startsAt.getTime() - env.WHATSAPP_REMINDER_HOURS_BEFORE * 3600_000);
+    await enqueueReminder(appointmentId, tenantId, remindAt);
+  } catch (err) {
+    console.warn(`[appointments] enqueue reminder falló (sweeper retomará): ${(err as Error).message}`);
+  }
+}
 
 export async function createAppointment(
   ctx: AuditContext, role: UserRole, input: CreateAppointmentInput,
@@ -70,6 +86,8 @@ export async function createAppointment(
         ctx, action: 'CREATE_PATIENT', entityType: 'Appointment', entityId: appt.id,
         metadata: { patientId: appt.patientId, professionalId: appt.professionalId, startsAt: appt.startsAt },
       });
+      // Encolar recordatorio WhatsApp (best-effort)
+      await tryEnqueueReminder(appt.id, ctx.tenantId, appt.startsAt);
       return appt;
     });
 }
@@ -103,7 +121,7 @@ export async function updateAppointment(
       }
     }
 
-    return tx.appointment.update({
+    const updated = await tx.appointment.update({
       where: { id },
       data: {
         startsAt: newStart,
@@ -114,6 +132,8 @@ export async function updateAppointment(
         cancelReason: input.cancelReason,
         cancelledAt: input.status === 'CANCELLED' ? new Date() : undefined,
         cancelledBy: input.status === 'CANCELLED' ? ctx.actorId : undefined,
+        // Si la cita fue movida, hay que re-encolar el recordatorio
+        reminderSentAt: input.startsAt ? null : undefined,
         serviceId: input.serviceId,
         roomId: input.roomId,
       },
@@ -122,7 +142,18 @@ export async function updateAppointment(
         professional: { select: { id: true, fullName: true } },
       },
     });
-  });
+    return updated;
+  })
+    .then(async (appt) => {
+      // Si fue cancelada, anular recordatorio. Si fue movida, re-encolar.
+      if (appt.status === 'CANCELLED' || appt.status === 'NO_SHOW') {
+        await cancelReminder(appt.id).catch(() => {});
+      } else if (input.startsAt) {
+        await cancelReminder(appt.id).catch(() => {});
+        await tryEnqueueReminder(appt.id, ctx.tenantId, appt.startsAt);
+      }
+      return appt;
+    });
 }
 
 export async function listAppointments(

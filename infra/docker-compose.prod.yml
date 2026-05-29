@@ -27,6 +27,21 @@ services:
       POSTGRES_USER: surco
       POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD requerido}
       POSTGRES_DB: surco_health
+    # Tuning para VPS compartido: 2GB shared_buffers + work_mem 16MB
+    command:
+      - "postgres"
+      - "-c"
+      - "shared_buffers=1GB"
+      - "-c"
+      - "effective_cache_size=3GB"
+      - "-c"
+      - "work_mem=16MB"
+      - "-c"
+      - "maintenance_work_mem=256MB"
+      - "-c"
+      - "max_connections=150"
+      - "-c"
+      - "random_page_cost=1.1"
     volumes:
       - surco_pgdata:/var/lib/postgresql/data
       # Script que activa pgcrypto + pg_trgm al primer arranque
@@ -38,13 +53,26 @@ services:
       interval: 5s
       timeout: 5s
       retries: 15
+    mem_limit: 2g
+    mem_reservation: 1g
+    cpus: 2.0
     networks: [internal]
 
   redis:
     image: redis:7-alpine
     container_name: surco_redis
     restart: *restart
-    command: ["redis-server", "--save", "60", "1", "--appendonly", "yes"]
+    command:
+      - "redis-server"
+      - "--save"
+      - "60"
+      - "1"
+      - "--appendonly"
+      - "yes"
+      - "--maxmemory"
+      - "256mb"
+      - "--maxmemory-policy"
+      - "noeviction"  # NO evict — los jobs delayed son críticos
     volumes:
       - surco_redisdata:/data
     ports:
@@ -54,6 +82,9 @@ services:
       interval: 5s
       timeout: 3s
       retries: 5
+    mem_limit: 384m
+    mem_reservation: 128m
+    cpus: 0.5
     networks: [internal]
 
   minio:
@@ -74,6 +105,9 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    mem_limit: 512m
+    mem_reservation: 128m
+    cpus: 1.0
     networks: [internal]
 
   api:
@@ -86,20 +120,21 @@ services:
     depends_on:
       postgres: { condition: service_healthy }
       redis:    { condition: service_started }
-    environment:
+    environment: &api_env
       NODE_ENV: production
-      DATABASE_URL: "postgresql://surco:${DB_PASSWORD}@postgres:5432/surco_health?schema=public"
+      DATABASE_URL: "postgresql://surco:${DB_PASSWORD}@postgres:5432/surco_health?schema=public&connection_limit=15&pool_timeout=20"
       REDIS_URL: "redis://redis:6379"
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET requerido}
       JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?JWT_REFRESH_SECRET requerido}
       JWT_ACCESS_TTL: 15m
-      JWT_REFRESH_TTL: 30d
+      JWT_REFRESH_TTL: 14d
       ENCRYPTION_KEY: ${ENCRYPTION_KEY:?ENCRYPTION_KEY requerido}
       API_PORT: 4000
       API_HOST: 0.0.0.0
       WEB_BASE_URL: ${WEB_BASE_URL:-https://app.salud.surcoapp.tech}
       CORS_ORIGINS: ${CORS_ORIGINS:-https://app.salud.surcoapp.tech}
       WORKER_ENABLED: ${WORKER_ENABLED:-true}
+      WHATSAPP_REMINDER_HOURS_BEFORE: ${WHATSAPP_REMINDER_HOURS_BEFORE:-24}
       # Storage (MinIO interno)
       S3_ENDPOINT: http://minio:9000
       S3_REGION: us-east-1
@@ -107,7 +142,7 @@ services:
       S3_SECRET_KEY: ${S3_SECRET_KEY}
       S3_BUCKET: ${S3_BUCKET:-surco-health-files}
       S3_FORCE_PATH_STYLE: "true"
-      # Telehealth / WhatsApp / Stripe — opcionales
+      # Telehealth / WhatsApp legacy / Stripe — opcionales
       DAILY_API_KEY: ${DAILY_API_KEY:-}
       DAILY_DOMAIN: ${DAILY_DOMAIN:-}
       WHATSAPP_TOKEN: ${WHATSAPP_TOKEN:-}
@@ -116,6 +151,39 @@ services:
       STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
     ports:
       - "127.0.0.1:4002:4000"
+    # Healthcheck real: verifica que el endpoint /health responda 200
+    # (que a su vez verifica Postgres + Redis). Si falla, Docker reinicia.
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:4000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    # Límite duro para evitar OOM cascade que tumbe Postgres
+    mem_limit: 1g
+    mem_reservation: 512m
+    cpus: 2.0
+    networks: [internal]
+
+  # ============================================================
+  # WORKER BullMQ — recordatorios WhatsApp + sweeper
+  # Container separado del api: si la api reinicia, los jobs delayed
+  # siguen vivos. Si el worker crashea, la api no se ve afectada.
+  # ============================================================
+  worker:
+    image: surco_health_api:latest  # mismo build que api
+    container_name: surco_worker
+    restart: *restart
+    command: ["node", "/repo/apps/api/dist/worker.js"]
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis:    { condition: service_started }
+      api:      { condition: service_started }  # boot order; usa misma imagen
+    environment:
+      <<: *api_env  # reusar todas las env vars del api
+    mem_limit: 768m
+    mem_reservation: 256m
+    cpus: 1.0
     networks: [internal]
 
   web:
@@ -136,6 +204,9 @@ services:
       NEXT_PUBLIC_APP_DOMAIN: ${NEXT_PUBLIC_APP_DOMAIN:-app.salud.surcoapp.tech}
     ports:
       - "127.0.0.1:3002:3000"
+    mem_limit: 768m
+    mem_reservation: 256m
+    cpus: 1.5
     networks: [internal]
 
 volumes:

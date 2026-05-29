@@ -1,5 +1,6 @@
 import type { FastifyRequest, FastifyReply } from 'fastify';
 import { prisma } from '../plugins/prisma';
+import { cacheGet, cacheSet, cacheDel } from '../plugins/redis';
 import { verifyAccessToken } from '../utils/jwt';
 import type { AuthContext, UserRole } from '@surco/shared';
 
@@ -7,6 +8,33 @@ declare module 'fastify' {
   interface FastifyRequest {
     auth: AuthContext;
   }
+}
+
+interface CachedAuthUser {
+  userId: string;
+  tenantId: string | null;
+  role: UserRole;
+  specialty: string | null;
+  isActive: boolean;
+  tenantIsActive: boolean | null;
+  tenantPlanExpiresAt: string | null; // ISO
+}
+
+const AUTH_CACHE_TTL = 60; // 60s — invalidación corta para revocaciones rápidas
+
+function authCacheKey(userId: string): string {
+  return `auth:user:${userId}`;
+}
+
+/**
+ * Invalida la cache de un usuario. Llamar cuando:
+ *  - El usuario es desactivado
+ *  - El rol cambia
+ *  - El tenant cambia de plan o expira
+ *  - El usuario cambia de tenant
+ */
+export async function invalidateAuthCache(userId: string): Promise<void> {
+  await cacheDel(authCacheKey(userId));
 }
 
 export async function authMiddleware(req: FastifyRequest, reply: FastifyReply) {
@@ -22,29 +50,50 @@ export async function authMiddleware(req: FastifyRequest, reply: FastifyReply) {
     return reply.code(401).send({ error: 'INVALID_TOKEN' });
   }
 
-  const user = await prisma.user.findUnique({
-    where: { id: payload.userId },
-    include: { tenant: { include: { plan: true } } },
-  });
+  // 1) Hit cache — evita el JOIN user→tenant→plan en cada request
+  let cached = await cacheGet<CachedAuthUser>(authCacheKey(payload.userId));
 
-  if (!user || !user.isActive) {
-    return reply.code(401).send({ error: 'USER_INACTIVE' });
+  if (!cached) {
+    // 2) Miss — leer de BD y poblar cache
+    const user = await prisma.user.findUnique({
+      where: { id: payload.userId },
+      include: { tenant: { include: { plan: true } } },
+    });
+    if (!user) {
+      return reply.code(401).send({ error: 'USER_NOT_FOUND' });
+    }
+    cached = {
+      userId: user.id,
+      tenantId: user.tenantId,
+      role: user.role as UserRole,
+      specialty: user.specialty ?? null,
+      isActive: user.isActive,
+      tenantIsActive: user.tenant?.isActive ?? null,
+      tenantPlanExpiresAt: user.tenant?.planExpiresAt?.toISOString() ?? null,
+    };
+    await cacheSet(authCacheKey(payload.userId), cached, AUTH_CACHE_TTL);
   }
 
-  if (user.tenant) {
-    if (!user.tenant.isActive) {
-      return reply.code(403).send({ error: 'TENANT_INACTIVE' });
-    }
-    if (user.tenant.planExpiresAt && user.tenant.planExpiresAt < new Date()) {
-      return reply.code(402).send({ error: 'TENANT_SUBSCRIPTION_EXPIRED' });
-    }
+  // 3) Verificar status (estos campos vienen de la cache pero son revocables
+  //    en máximo AUTH_CACHE_TTL segundos)
+  if (!cached.isActive) {
+    return reply.code(401).send({ error: 'USER_INACTIVE' });
+  }
+  if (cached.tenantIsActive === false) {
+    return reply.code(403).send({ error: 'TENANT_INACTIVE' });
+  }
+  if (
+    cached.tenantPlanExpiresAt &&
+    new Date(cached.tenantPlanExpiresAt).getTime() < Date.now()
+  ) {
+    return reply.code(402).send({ error: 'TENANT_SUBSCRIPTION_EXPIRED' });
   }
 
   req.auth = {
-    userId: user.id,
-    tenantId: user.tenantId,
-    role: user.role as UserRole,
-    specialty: user.specialty ?? null,
+    userId: cached.userId,
+    tenantId: cached.tenantId,
+    role: cached.role,
+    specialty: cached.specialty,
   };
 }
 

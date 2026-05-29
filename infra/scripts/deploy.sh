@@ -60,11 +60,37 @@ docker compose -f "$COMPOSE" --env-file .env run --rm \
   --entrypoint sh api \
   -c "cd /repo && pnpm --filter @surco/db exec $PRISMA_CMD"
 
-# Re-ejecutar SQL de extensiones y trigger anti-mutación
-log "Aplicando trigger anti-mutación sobre AuditLog..."
-docker compose -f "$COMPOSE" --env-file .env exec -T postgres \
-  psql -U surco -d surco_health < infra/postgres-init/02-trigger-auditlog.sql || \
-  warn "No se pudo aplicar el trigger (posiblemente la tabla aún no existe — corre el seed primero)"
+# Aplicar post-deploy SQL: trigger AuditLog inmutable, EXCLUDE constraint
+# en Appointment (anti-doble-booking), GIN indexes pg_trgm para búsqueda.
+# DEBE corren DESPUÉS de prisma db push (las tablas ya existen).
+log "Aplicando post-deploy SQL (trigger AuditLog + EXCLUDE constraint + GIN trgm)..."
+if ! docker compose -f "$COMPOSE" --env-file .env exec -T postgres \
+  psql -U surco -d surco_health -v ON_ERROR_STOP=1 < infra/sql/post-deploy.sql; then
+  die "FALLO al aplicar post-deploy SQL. El trigger inmutable + constraint anti-overlap son CRÍTICOS para compliance Res 1995/1999. Aborta el deploy hasta arreglar."
+fi
+log "  ✓ Trigger AuditLog inmutable verificado"
+log "  ✓ Constraint EXCLUDE anti-doble-booking verificado"
+log "  ✓ GIN indexes pg_trgm verificados"
+
+# Importar dataset CIE-10 si la BD tiene muy pocos códigos (~10 del seed).
+# Best-effort: si falla la descarga del dataset Minsalud, el deploy NO falla
+# (el seed dejó 10 códigos básicos como fallback). Pero registramos warning.
+log "Verificando dataset CIE-10..."
+ICD10_COUNT=$(docker compose -f "$COMPOSE" --env-file .env exec -T postgres \
+  psql -U surco -d surco_health -At -c 'SELECT COUNT(*) FROM "Icd10Code";' 2>/dev/null || echo 0)
+if [[ "$ICD10_COUNT" -lt 1000 ]]; then
+  log "Solo $ICD10_COUNT códigos CIE-10. Importando dataset completo de Minsalud..."
+  if docker compose -f "$COMPOSE" --env-file .env run --rm \
+    --entrypoint sh api \
+    -c "cd /repo && pnpm --filter @surco/db db:seed:icd10"; then
+    log "  ✓ Dataset CIE-10 importado"
+  else
+    warn "Falló la importación CIE-10 (Minsalud sin respuesta). El autocomplete funcionará con los ~10 códigos del seed. Re-ejecuta manualmente:"
+    warn "  docker compose -f $COMPOSE --env-file .env run --rm api pnpm --filter @surco/db db:seed:icd10"
+  fi
+else
+  log "  ✓ Dataset CIE-10 ya cargado ($ICD10_COUNT códigos)"
+fi
 
 log "Levantando api y web..."
 docker compose -f "$COMPOSE" --env-file .env up -d --remove-orphans api web

@@ -6,6 +6,8 @@ import sensible from '@fastify/sensible';
 import { env, corsOrigins } from './config/env';
 import { AppError } from './utils/errors';
 import { verifyEncryptionSetup } from '@surco/encryption';
+import { prisma } from './plugins/prisma';
+import { redisHealthcheck } from './plugins/redis';
 
 import authRoutes from './modules/auth/auth.routes';
 import tenantsRoutes from './modules/tenants/tenants.routes';
@@ -18,6 +20,8 @@ import medicalRoutes from './modules/medical/medical.routes';
 import psychologyRoutes from './modules/psychology/psychology.routes';
 import catalogRoutes from './modules/catalog/catalog.routes';
 import fhirRoutes from './modules/fhir/fhir.routes';
+import whatsappRoutes from './modules/whatsapp/whatsapp.routes';
+import arcoRoutes from './modules/arco/arco.routes';
 
 async function buildServer() {
   const app = Fastify({
@@ -34,15 +38,31 @@ async function buildServer() {
   await app.register(cors, {
     origin: (origin, cb) => {
       if (!origin) return cb(null, true);
-      if (corsOrigins.some((a) => (a.startsWith('*.') ? origin.endsWith(a.slice(2)) : origin === a))) {
-        return cb(null, true);
-      }
+      // FIX seguridad: el patrón antiguo `endsWith(rootDomain)` permite
+      // `evilroot.com` cuando root es `root.com`. Forzamos un punto delante.
+      const allowed = corsOrigins.some((a) => {
+        if (a.startsWith('*.')) {
+          const suffix = a.slice(1); // ".surcoapp.tech"
+          return origin === `https://${a.slice(2)}` || origin.endsWith(suffix);
+        }
+        return origin === a;
+      });
+      if (allowed) return cb(null, true);
       cb(new Error('CORS_BLOCKED'), false);
     },
     credentials: true,
   });
   await app.register(sensible);
-  await app.register(rateLimit, { max: 100, timeWindow: '1 minute' });
+  // Rate limit por tenant si está autenticado, sino por IP — evita que
+  // recepcionistas detrás del mismo NAT compartan el límite.
+  await app.register(rateLimit, {
+    max: 200,
+    timeWindow: '1 minute',
+    keyGenerator: (req) => {
+      const t = (req as any).auth?.tenantId;
+      return t ? `tenant:${t}` : `ip:${req.ip}`;
+    },
+  });
 
   app.setErrorHandler((err, req, reply) => {
     if (err instanceof AppError) {
@@ -52,7 +72,34 @@ async function buildServer() {
     return reply.code(500).send({ error: 'INTERNAL_ERROR' });
   });
 
-  app.get('/health', async () => ({ status: 'ok', ts: new Date().toISOString() }));
+  // Health real: chequea Postgres + Redis. Si algo está roto, responde 503.
+  // Esto permite que Caddy / load balancer detecte un container muerto.
+  app.get('/health', async (_req, reply) => {
+    const checks = {
+      api: 'ok',
+      postgres: 'unknown' as 'ok' | 'fail' | 'unknown',
+      redis: 'unknown' as 'ok' | 'fail' | 'unknown',
+    };
+    try {
+      await prisma.$queryRaw`SELECT 1`;
+      checks.postgres = 'ok';
+    } catch {
+      checks.postgres = 'fail';
+    }
+    try {
+      checks.redis = (await redisHealthcheck()) ? 'ok' : 'fail';
+    } catch {
+      checks.redis = 'fail';
+    }
+    const healthy = checks.postgres === 'ok' && (checks.redis === 'ok' || !env.REDIS_URL);
+    return reply
+      .code(healthy ? 200 : 503)
+      .send({
+        status: healthy ? 'ok' : 'degraded',
+        ts: new Date().toISOString(),
+        checks,
+      });
+  });
 
   // ============ Rutas autenticadas ============
   app.register(
@@ -72,6 +119,8 @@ async function buildServer() {
   await app.register(psychologyRoutes, { prefix: '/api/psychology' });
   await app.register(catalogRoutes, { prefix: '/api/catalog' });
   await app.register(fhirRoutes, { prefix: '/api/fhir' });
+  await app.register(whatsappRoutes, { prefix: '/api/whatsapp' });
+  await app.register(arcoRoutes, { prefix: '/api/arco' });
 
   return app;
 }

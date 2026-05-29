@@ -1,26 +1,14 @@
 -- ============================================================
--- Surco Health — Trigger anti-mutación sobre AuditLog
+-- DEPRECATED — Este archivo corre vía docker-entrypoint-initdb.d en el
+-- PRIMER boot del container, ANTES de que Prisma cree la tabla AuditLog.
+-- Por eso el trigger NUNCA se aplicaba (auditoría 2026-05-25: bug crítico
+-- de compliance — audit log mutable en producción).
 --
--- Se aplica después de que Prisma cree la tabla AuditLog.
--- Si la tabla todavía no existe (primer boot), no hace nada.
+-- El trigger correcto + EXCLUDE constraint anti-doble-booking + GIN indexes
+-- pg_trgm viven ahora en `infra/sql/post-deploy.sql`, que el `deploy.sh`
+-- ejecuta DESPUÉS de `prisma db push`.
+--
+-- Este archivo se conserva como no-op solo para no romper docker-compose
+-- mounts existentes en el VPS.
 -- ============================================================
-
-DO $$
-BEGIN
-  IF EXISTS (SELECT 1 FROM pg_class WHERE relname = 'AuditLog') THEN
-    DROP TRIGGER IF EXISTS prevent_audit_log_mutation ON "AuditLog";
-
-    CREATE OR REPLACE FUNCTION prevent_audit_mutation()
-    RETURNS TRIGGER AS $func$
-    BEGIN
-      RAISE EXCEPTION 'AuditLog es append-only; UPDATE/DELETE prohibido por compliance';
-    END;
-    $func$ LANGUAGE plpgsql;
-
-    CREATE TRIGGER prevent_audit_log_mutation
-      BEFORE UPDATE OR DELETE ON "AuditLog"
-      FOR EACH ROW EXECUTE FUNCTION prevent_audit_mutation();
-  END IF;
-EXCEPTION WHEN OTHERS THEN
-  NULL;
-END $$;
+SELECT 'NOTICE: post-deploy SQL moved to infra/sql/post-deploy.sql' AS notice;
