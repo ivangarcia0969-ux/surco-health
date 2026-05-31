@@ -19,8 +19,12 @@ export async function getMyTenant(tenantId: string, role?: string | null) {
   }
 
   // Roles no-owner: omitir IDs de Stripe + datos tributarios sensibles
-  const { stripeCustomerId, stripeSubscriptionId, stripeSubscriptionStatus, taxId, ...safe } =
-    tenant;
+  // (defensa contra phishing dirigido a soporte Stripe con esos IDs)
+  const safe: any = { ...tenant };
+  delete safe.stripeCustomerId;
+  delete safe.stripeSubscriptionId;
+  delete safe.stripeSubscriptionStatus;
+  delete safe.taxId;
   return safe;
 }
 

@@ -183,10 +183,7 @@ export async function buildFhirCompositionFromRecord(ctx: AuditContext, recordId
  * los datos precargados (ej. $everything).
  */
 function vitalsToObservation(
-  vs: NonNullable<Awaited<ReturnType<typeof prisma.clinicalRecord.findFirst>> & {
-    vitalSigns: any;
-    professional: any;
-  }>['vitalSigns'],
+  vs: any,  // VitalSigns precargado vía include
   rec: { id: string; patientId: string; professionalId: string; professional?: { fullName?: string | null } | null },
 ) {
   const components: any[] = [];
