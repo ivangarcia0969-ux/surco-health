@@ -52,18 +52,13 @@ ALTER TABLE "Appointment"
   DROP CONSTRAINT IF EXISTS appointment_no_overlap_per_professional;
 
 -- Solo bloquea overlaps cuando la cita NO está CANCELLED ni NO_SHOW (esas no ocupan agenda)
--- IMPORTANTE: tstzrange(timestamptz, timestamptz) NO es IMMUTABLE en Postgres
--- (depende de session timezone). Para usarlo en un EXCLUDE constraint (que
--- requiere IMMUTABLE) hay que convertir a timestamp without TZ con
--- AT TIME ZONE 'UTC', que SÍ es IMMUTABLE con literal de texto.
+-- Prisma DateTime → "timestamp without time zone" en Postgres (no timestamptz).
+-- tsrange(timestamp, timestamp) ES IMMUTABLE → válido en EXCLUDE constraint.
 ALTER TABLE "Appointment"
   ADD CONSTRAINT appointment_no_overlap_per_professional
   EXCLUDE USING gist (
     "professionalId" WITH =,
-    tsrange(
-      ("startsAt" AT TIME ZONE 'UTC'),
-      ("endsAt"   AT TIME ZONE 'UTC')
-    ) WITH &&
+    tsrange("startsAt", "endsAt") WITH &&
   ) WHERE (status NOT IN ('CANCELLED', 'NO_SHOW'));
 
 -- ============================================================
