@@ -48,7 +48,9 @@ async function sweep(): Promise<void> {
     // Filtramos también por status activo y patient con teléfono.
     const candidates = await prisma.appointment.findMany({
       where: {
-        status: { in: ['PENDING', 'CONFIRMED'] },
+        // AppointmentStatus = REQUESTED | CONFIRMED | CHECKED_IN | IN_PROGRESS | ATTENDED | NO_SHOW | CANCELLED
+        // Recordamos solo a las activas que aún NO fueron atendidas
+        status: { in: ['REQUESTED', 'CONFIRMED'] },
         startsAt: { gte: new Date(now.getTime() + 60 * 60_000), lte: horizon },
         reminderSentAt: null,
         patient: { phone: { not: null } },

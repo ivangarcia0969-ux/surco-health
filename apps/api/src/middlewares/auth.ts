@@ -93,7 +93,8 @@ export async function authMiddleware(req: FastifyRequest, reply: FastifyReply) {
     userId: cached.userId,
     tenantId: cached.tenantId,
     role: cached.role,
-    specialty: cached.specialty,
+    // Cast: en cache guardamos string | null; el tipo de AuthContext es Specialty | null
+    specialty: cached.specialty as AuthContext['specialty'],
   };
 }
 

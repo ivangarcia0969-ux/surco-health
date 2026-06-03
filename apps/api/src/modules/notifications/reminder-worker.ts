@@ -83,7 +83,9 @@ async function processReminderJob(
     return { status: 'SKIPPED_CANCELLED' };
   }
 
-  if (appt.status === 'CANCELLED' || appt.status === 'NO_SHOW' || appt.status === 'COMPLETED') {
+  // Si la cita ya fue atendida, no enviada, cancelada o no se presentó: nada que recordar.
+  // AppointmentStatus en el schema: ATTENDED es el equivalente de COMPLETED.
+  if (appt.status === 'CANCELLED' || appt.status === 'NO_SHOW' || appt.status === 'ATTENDED') {
     return { status: 'SKIPPED_CANCELLED' };
   }
   if (appt.reminderSentAt) {
