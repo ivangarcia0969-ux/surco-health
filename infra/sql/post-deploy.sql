@@ -52,11 +52,14 @@ ALTER TABLE "Appointment"
   DROP CONSTRAINT IF EXISTS appointment_no_overlap_per_professional;
 
 -- Solo bloquea overlaps cuando la cita NO está CANCELLED ni NO_SHOW (esas no ocupan agenda)
+-- tstzrange con 2 args = default bound '[)'. La forma de 3 args con literal
+-- de texto provoca "functions in index expression must be marked IMMUTABLE"
+-- en algunas versiones de Postgres 16.
 ALTER TABLE "Appointment"
   ADD CONSTRAINT appointment_no_overlap_per_professional
   EXCLUDE USING gist (
     "professionalId" WITH =,
-    tstzrange("startsAt", "endsAt", '[)') WITH &&
+    tstzrange("startsAt", "endsAt") WITH &&
   ) WHERE (status NOT IN ('CANCELLED', 'NO_SHOW'));
 
 -- ============================================================
