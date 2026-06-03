@@ -71,7 +71,7 @@ CREATE INDEX patient_fullname_trgm_idx
 
 DROP INDEX IF EXISTS patient_document_trgm_idx;
 CREATE INDEX patient_document_trgm_idx
-  ON "Patient" USING gin ("document" gin_trgm_ops);
+  ON "Patient" USING gin ("documentId" gin_trgm_ops);
 
 -- ============================================================
 -- 4) Permisos: que el role app NO pueda deshabilitar el trigger
