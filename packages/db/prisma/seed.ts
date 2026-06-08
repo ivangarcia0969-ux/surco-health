@@ -8,15 +8,19 @@ async function main() {
 
   // ============ PLANES ============
   const plans = await Promise.all([
+    // Plan FREE DESACTIVADO: ya no se ofrece plan gratis. Fila conservada
+    // (isActive:false) por compatibilidad. Clientes nuevos = 14 días de prueba
+    // del plan Pro (ver auth.service registerClinic).
     prisma.plan.upsert({
       where: { tier: PlanTier.FREE },
-      update: {},
+      update: { isActive: false },
       create: {
         tier: PlanTier.FREE, name: 'Free',
         priceMonthlyUsd: 0,
         maxProfessionals: 1, maxAppointmentsPerMonth: 30, maxStorageGb: 1,
         whatsappEnabled: true, whatsappMonthlyLimit: 50,
         maxWhatsappAccounts: 1,
+        isActive: false,
       },
     }),
     prisma.plan.upsert({

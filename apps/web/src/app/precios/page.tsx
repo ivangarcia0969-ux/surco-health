@@ -6,42 +6,26 @@ export const metadata = {
 };
 
 // NOTA: ajusta estos valores a tu estrategia comercial. Precios en COP/mes.
-// Para venta concierge, estos son referencia; puedes negociar por cliente.
+// Sin plan gratis: todos incluyen 14 días de prueba. Para venta concierge,
+// estos son referencia; puedes negociar por cliente.
 const PLANS = [
-  {
-    tier: 'FREE',
-    name: 'Free',
-    price: '$0',
-    period: 'para siempre',
-    tagline: 'Para probar la plataforma',
-    cta: 'Empezar gratis',
-    highlight: false,
-    features: [
-      '1 profesional',
-      '30 citas / mes',
-      'Historia clínica electrónica',
-      'Agenda básica',
-      'CIE-10 + odontograma',
-      'Cumplimiento Habeas Data',
-    ],
-  },
   {
     tier: 'PRO',
     name: 'Pro',
     price: '$89.000',
     period: 'COP / mes',
     tagline: 'Para consultorios independientes',
-    cta: 'Empezar 14 días gratis',
+    cta: 'Probar 14 días',
     highlight: false,
     features: [
       'Hasta 5 profesionales',
       'Citas ilimitadas',
-      'Todo lo de Free, más:',
+      'Historia clínica electrónica',
+      'CIE-10 + odontograma',
       'Notas SOAP cifradas (psicología)',
       'Tests psicométricos (PHQ-9, GAD-7, BDI-II)',
       'Plan de tratamiento dental',
-      'Facturación electrónica',
-      'Teleconsulta',
+      'Facturación electrónica · Teleconsulta',
     ],
   },
   {
@@ -94,7 +78,7 @@ export default function PricingPage() {
         <p className="mt-2 text-sm text-gray-500">Precio por profesional. Pago mensual o anual (2 meses gratis al año).</p>
       </div>
 
-      <div className="mt-10 grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-4">
+      <div className="mt-10 grid grid-cols-1 gap-6 md:grid-cols-3 lg:grid-cols-3">
         {PLANS.map((p) => (
           <div
             key={p.tier}

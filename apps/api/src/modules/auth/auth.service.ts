@@ -88,10 +88,16 @@ export async function registerClinic(input: RegisterClinicInput) {
   const emailExists = await prisma.user.findUnique({ where: { email: input.ownerEmail } });
   if (emailExists) throw new AppError('EMAIL_TAKEN', 409);
 
-  const freePlan = await prisma.plan.findUnique({ where: { tier: PlanTier.FREE } });
-  if (!freePlan) throw new AppError('NO_FREE_PLAN', 500);
+  // Ya NO existe plan gratis: el cliente nuevo arranca con 14 días de prueba
+  // del plan de entrada (Pro). Usamos planExpiresAt (no solo trialEndsAt) para
+  // que el authMiddleware bloquee automáticamente al vencer la prueba.
+  const trialPlan =
+    (await prisma.plan.findUnique({ where: { tier: PlanTier.PRO } })) ??
+    (await prisma.plan.findFirst({ where: { isActive: true }, orderBy: { priceMonthlyUsd: 'asc' } }));
+  if (!trialPlan) throw new AppError('NO_PLAN_AVAILABLE', 500);
 
   const passwordHash = await hashPassword(input.ownerPassword);
+  const trialEnd = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000);
 
   const tenant = await prisma.tenant.create({
     data: {
@@ -104,8 +110,9 @@ export async function registerClinic(input: RegisterClinicInput) {
       primarySpecialty: input.primarySpecialty ?? null,
       taxId: input.taxId,
       taxIdType: input.taxIdType,
-      planId: freePlan.id,
-      trialEndsAt: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000),
+      planId: trialPlan.id,
+      planExpiresAt: trialEnd,   // ← bloquea al vencer la prueba
+      trialEndsAt: trialEnd,     // ← para mostrar "estás en prueba"
       privacyPolicyAcceptedAt: new Date(),
       users: {
         create: {
