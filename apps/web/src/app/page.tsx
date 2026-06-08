@@ -17,6 +17,9 @@ export default function HomePage() {
         <Link href="/register" className="rounded-lg bg-brand-600 px-6 py-3 text-white shadow hover:bg-brand-700">
           Empezar gratis · 14 días
         </Link>
+        <Link href="/precios" className="rounded-lg border border-gray-300 bg-white px-6 py-3 text-gray-800 hover:bg-gray-50">
+          Ver planes y precios
+        </Link>
         <Link href="/login" className="rounded-lg border border-gray-300 bg-white px-6 py-3 text-gray-800 hover:bg-gray-50">
           Iniciar sesión
         </Link>

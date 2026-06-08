@@ -22,6 +22,7 @@ import catalogRoutes from './modules/catalog/catalog.routes';
 import fhirRoutes from './modules/fhir/fhir.routes';
 import whatsappRoutes from './modules/whatsapp/whatsapp.routes';
 import arcoRoutes from './modules/arco/arco.routes';
+import adminRoutes from './modules/admin/admin.routes';
 
 async function buildServer() {
   const app = Fastify({
@@ -121,6 +122,7 @@ async function buildServer() {
   await app.register(fhirRoutes, { prefix: '/api/fhir' });
   await app.register(whatsappRoutes, { prefix: '/api/whatsapp' });
   await app.register(arcoRoutes, { prefix: '/api/arco' });
+  await app.register(adminRoutes, { prefix: '/api/admin' });
 
   return app;
 }
