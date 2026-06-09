@@ -47,7 +47,10 @@ export function Sidebar({ role, specialty }: { role: string; specialty?: string 
   return (
     <aside className="hidden w-60 shrink-0 flex-col border-r border-gray-200 bg-white md:flex">
       <div className="border-b border-gray-200 px-5 py-4">
-        <div className="text-sm font-semibold text-brand-600">Surco Health</div>
+        <div className="flex items-center gap-2 text-base font-bold text-gray-900">
+          <span className="flex h-6 w-6 items-center justify-center rounded-md bg-brand-600 text-xs text-white">✚</span>
+          Surco<span className="text-brand-600">Health</span>
+        </div>
         <div className="mt-1 text-sm font-medium text-gray-900 truncate">{user?.fullName}</div>
         {specialty && <div className="text-xs text-gray-500">{SPECIALTY_LABEL[specialty] ?? specialty}</div>}
       </div>

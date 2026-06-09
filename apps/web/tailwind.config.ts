@@ -5,14 +5,17 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
+        // Tema healthcare: teal médico como color de marca (antes azul #3b6bff).
+        // Remapear aquí re-tematiza TODA la app interior (botones, links,
+        // estados activos, acentos) de azul a teal, a juego con el landing.
         brand: {
-          50: '#f0f7ff',
-          100: '#dceaff',
-          200: '#bbd6ff',
-          500: '#3b6bff',
-          600: '#2c52ea',
-          700: '#2542c2',
-          900: '#0e1f70',
+          50: '#f0fdfa',
+          100: '#cdfaf2',
+          200: '#9bf0e4',
+          500: '#14b8a6',
+          600: '#0d9488',
+          700: '#0f766e',
+          900: '#134e4a',
         },
         clinical: {
           healthy: '#10b981',
