@@ -9,7 +9,7 @@ export const metadata = {
 // Sin plan gratis: todos incluyen 14 días de prueba. Para venta concierge,
 // estos son referencia; puedes negociar por cliente.
 // ⚙️ Tu número de WhatsApp de ventas (sin + ni espacios). CAMBIA por el real.
-const WHATSAPP_VENTAS = '573001234567';
+const WHATSAPP_VENTAS = '573122252814';
 
 const PLANS = [
   {

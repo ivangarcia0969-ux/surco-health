@@ -338,7 +338,7 @@ function BotCard({
             <input
               value={testNumber}
               onChange={(e) => setTestNumber(e.target.value)}
-              placeholder="+573001234567"
+              placeholder="+573122252814"
               className="flex-1 rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
             />
             <Button onClick={sendTest} loading={testing} type="button">
