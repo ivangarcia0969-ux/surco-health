@@ -2,11 +2,28 @@
 
 > **Documento maestro** que captura todo el trabajo realizado, decisiones tomadas, infraestructura y status de los proyectos SaaS de Iván García.
 >
-> **Última actualización:** 2026-05-28 (FASES 0/1/2 ejecutadas tras auditoría — apto para marketing controlado ✅)
+> **Última actualización:** 2026-06-09 (Branding + temas visuales + control de prueba + escalabilidad DB — ambas apps vendibles ✅)
 >
 > Este archivo vive en ambos repos (`Barbershop` y `surco-health`) y se mantiene sincronizado por Git para no perder contexto entre sesiones.
 
 ## 🏁 HITOS POR FECHA
+
+### 2026-06-09 — Branding, temas visuales, control de prueba y escalabilidad
+- **Rebrand barbería → "Fígaro App"** (antes "SaaS Barberías"/"BarberPro"). Logo tijeras doradas.
+- **Tema negro+dorado en TODA la app Fígaro** (landing, login, register, precios, legal, interior).
+  Vía `.app-shell` en globals.css + `brand` remapeado a carbón + paleta `ink`/`gold` + fuente Oswald.
+- **Surco Health: tema teal médico** (`brand`→`#0d9488`, paleta `care`), landing healthcare con
+  widget de consulta, interior refinado (cards rounded-2xl + sombras, sidebar con avatar/pills, KPIs con chips).
+- **Logos SVG + marca** en ambas: `components/brand/Logo.tsx`, `public/{favicon,icon,og}.svg`, `docs/BRAND.md`.
+- **WhatsApp ventas real: +57 312 2252814** cableado en /precios + /ajustes de ambas.
+- **Sin plan gratis** en ambas: prueba de `TRIAL_DAYS` días (default 14, configurable por env; 0=sin prueba).
+  FREE plan inactivo. Bloqueo automático al vencer `planExpiresAt` (402).
+- **Control de prueba documentado** (`docs/CONTROL-PRUEBA-Y-PLANES.md`): por env + panel admin + API.
+- **Escalabilidad DB** (`docs/DB-ESCALABILIDAD.md`): multi-tenant por fila, 21 índices, connection_limit=15,
+  tuning Postgres, EXCLUDE anti-doble-booking, GIN trgm. Aguanta ~200 tenants; 1000+ = PgBouncer.
+- **Método de deploy SSH** (la app no tiene SSH directo): Python+paramiko desde Bash, sube script con sftp,
+  corre en background, pollea log. Paths: Fígaro `/opt/saas-barberias`, Surco `/opt/surco-health`.
+- Commits clave Fígaro: `102a2e4` (trial+docs), `a984f0c` (tema completo), `4c5b4fa` (logos). Surco: `f4cf85a` (refinamiento), `010a9d2` (teal), `4aba0b7` (logos).
 
 ### 2026-05-28 (cont.) — FASE 2: bloqueadores medium post-auditoría
 - **Pendiente commit** (este turno)
