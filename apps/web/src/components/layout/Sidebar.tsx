@@ -4,6 +4,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import { apiFetch } from '@/lib/api';
 import { useAuth } from '@/lib/auth-store';
 import { cn, SPECIALTY_LABEL } from '@/lib/utils';
+import { LogoMark } from '@/components/brand/Logo';
 
 interface NavItem { href: string; label: string; icon: string }
 
@@ -55,7 +56,7 @@ export function Sidebar({ role, specialty }: { role: string; specialty?: string 
     <aside className="hidden w-64 shrink-0 flex-col border-r border-gray-100 bg-white md:flex">
       {/* Marca */}
       <div className="flex items-center gap-2.5 px-5 py-5">
-        <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-brand-500 to-brand-700 text-sm font-bold text-white shadow-sm">✚</span>
+        <LogoMark className="h-9 w-9" />
         <span className="text-lg font-bold tracking-tight text-gray-900">
           Surco<span className="text-brand-600">Health</span>
         </span>

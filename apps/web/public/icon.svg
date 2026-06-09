@@ -1,15 +1,17 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-label="Surco Health">
   <defs>
-    <linearGradient id="g" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#5b6cff"/>
-      <stop offset="100%" stop-color="#3b4cef"/>
+    <linearGradient id="teal" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#14b8a6"/>
+      <stop offset="1" stop-color="#0d9488"/>
     </linearGradient>
   </defs>
-  <rect width="512" height="512" rx="96" fill="url(#g)"/>
-  <!-- Cruz médica blanca -->
-  <g fill="#fff">
-    <rect x="216" y="120" width="80" height="272" rx="20"/>
-    <rect x="120" y="216" width="272" height="80" rx="20"/>
+  <rect width="512" height="512" rx="112" fill="url(#teal)"/>
+  <!-- Cruz médica -->
+  <g fill="#ffffff">
+    <rect x="214" y="120" width="84" height="272" rx="22"/>
+    <rect x="120" y="214" width="272" height="84" rx="22"/>
   </g>
-  <text x="256" y="460" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-weight="700" font-size="50" fill="#fff" text-anchor="middle" letter-spacing="-2">Surco</text>
+  <!-- Línea de pulso superpuesta -->
+  <path d="M120 300 H188 L214 250 L256 340 L298 270 L322 300 H392"
+        fill="none" stroke="#0f766e" stroke-width="16" stroke-linecap="round" stroke-linejoin="round" opacity="0.55"/>
 </svg>

@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { Logo } from '@/components/brand/Logo';
 
 export default function HomePage() {
   return (
@@ -6,10 +7,7 @@ export default function HomePage() {
       {/* ===== NAV ===== */}
       <header className="sticky top-0 z-30 border-b border-gray-100 bg-white/90 backdrop-blur">
         <nav className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
-          <span className="flex items-center gap-2 text-xl font-bold tracking-tight text-gray-900">
-            <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-care-600 text-white">✚</span>
-            Surco<span className="text-care-600">Health</span>
-          </span>
+          <Logo />
           <div className="hidden items-center gap-8 text-sm text-gray-600 md:flex">
             <a href="#especialidades" className="transition hover:text-care-600">Especialidades</a>
             <a href="#funciones" className="transition hover:text-care-600">Funciones</a>
@@ -227,10 +225,7 @@ export default function HomePage() {
       {/* ===== FOOTER ===== */}
       <footer className="border-t border-gray-100 bg-white py-10">
         <div className="mx-auto flex max-w-6xl flex-col items-center justify-between gap-4 px-6 text-sm text-gray-500 sm:flex-row">
-          <span className="flex items-center gap-2 font-bold text-gray-900">
-            <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-care-600 text-white">✚</span>
-            Surco<span className="text-care-600">Health</span>
-          </span>
+          <Logo />
           <div className="flex gap-6">
             <Link href="/precios" className="transition hover:text-care-600">Precios</Link>
             <Link href="/legal/privacidad" className="transition hover:text-care-600">Privacidad</Link>
