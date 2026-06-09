@@ -22,6 +22,17 @@ const config: Config = {
           implant: '#8b5cf6',
           absent: '#9ca3af',
         },
+        // Tema healthcare (landing): teal calmado + menta
+        care: {
+          50: '#f0fdfa',
+          100: '#cdfaf2',
+          200: '#9bf0e4',
+          300: '#5fe0d2',
+          500: '#14b8a6',
+          600: '#0d9488',
+          700: '#0f766e',
+          900: '#134e4a',
+        },
       },
       fontFamily: { sans: ['Inter', 'system-ui', 'sans-serif'] },
     },

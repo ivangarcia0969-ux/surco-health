@@ -8,6 +8,9 @@ export const metadata = {
 // NOTA: ajusta estos valores a tu estrategia comercial. Precios en COP/mes.
 // Sin plan gratis: todos incluyen 14 días de prueba. Para venta concierge,
 // estos son referencia; puedes negociar por cliente.
+// ⚙️ Tu número de WhatsApp de ventas (sin + ni espacios). CAMBIA por el real.
+const WHATSAPP_VENTAS = '573001234567';
+
 const PLANS = [
   {
     tier: 'PRO',
@@ -107,7 +110,7 @@ export default function PricingPage() {
               ))}
             </ul>
             <Link
-              href={p.tier === 'FREE' || p.tier === 'PRO' ? '/register' : 'https://wa.me/57XXXXXXXXXX'}
+              href={p.tier === 'PRO' ? '/register' : `https://wa.me/${WHATSAPP_VENTAS}`}
               className={
                 'mt-6 rounded-lg px-4 py-2.5 text-center text-sm font-medium transition ' +
                 (p.highlight
