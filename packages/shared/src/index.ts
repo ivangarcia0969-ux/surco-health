@@ -12,3 +12,4 @@ export * from './schemas/prescription';
 export * from './schemas/consent';
 export * from './schemas/file';
 export * from './schemas/catalog';
+export * from './schemas/billing';

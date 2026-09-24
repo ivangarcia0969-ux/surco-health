@@ -4,6 +4,14 @@ import { useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/auth-store';
 import type { UserRole } from '@surco/shared';
 
+/**
+ * Protege páginas que requieren sesión.
+ *
+ * 🔴 Espera a que zustand/persist termine de leer la sesión guardada en
+ * localStorage antes de decidir. Antes se leían los valores del primer render
+ * (todavía vacíos) y cualquier recarga (F5, pestaña nueva, URL directa)
+ * mandaba al login aunque hubiera sesión.
+ */
 export function useAuthGuard(allowed?: UserRole[]) {
   const router = useRouter();
   const user = useAuth((s) => s.user);
@@ -11,16 +19,24 @@ export function useAuthGuard(allowed?: UserRole[]) {
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
-    if (!accessToken || !user) {
-      router.replace('/login');
+    const check = () => {
+      const s = useAuth.getState();
+      if (!s.accessToken || !s.user) {
+        router.replace('/login');
+        return;
+      }
+      if (allowed && !allowed.includes(s.user.role)) {
+        router.replace('/dashboard');
+        return;
+      }
+      setReady(true);
+    };
+    if (useAuth.persist.hasHydrated()) {
+      check();
       return;
     }
-    if (allowed && !allowed.includes(user.role)) {
-      router.replace('/dashboard');
-      return;
-    }
-    setReady(true);
+    return useAuth.persist.onFinishHydration(check);
   }, [accessToken, user, allowed, router]);
 
-  return { ready, user };
+  return { ready, user: user ?? useAuth.getState().user };
 }

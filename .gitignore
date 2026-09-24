@@ -41,3 +41,6 @@ storage/
 *.pem
 *.key
 encryption-keys.json
+
+# Almacenamiento local de desarrollo (fallback sin MinIO)
+storage-local/

@@ -6,6 +6,8 @@ import { Button } from '@/components/ui/Button';
 import { Input, Select } from '@/components/ui/Input';
 import { formatDate, SPECIALTY_LABEL } from '@/lib/utils';
 import { WhatsappAccountsManager } from '@/components/settings/WhatsappAccountsManager';
+import { ConsentTemplatesManager } from '@/components/settings/ConsentTemplatesManager';
+import { ProfessionalSignature } from '@/components/settings/ProfessionalSignature';
 
 interface TenantMe {
   id: string;
@@ -54,6 +56,8 @@ export default function SettingsPage() {
 
       <BusinessProfile tenant={tenant} onSaved={load} />
       <PlanInfo tenant={tenant} usage={usage} />
+      <ConsentTemplatesManager />
+      <ProfessionalSignature />
       {usage.plan.whatsappEnabled && <WhatsappAccountsManager />}
     </div>
   );

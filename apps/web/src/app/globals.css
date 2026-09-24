@@ -12,3 +12,19 @@ html, body {
   color: rgb(var(--foreground));
   background: rgb(var(--background));
 }
+
+@keyframes toast-in {
+  from { opacity: 0; transform: translateY(8px) scale(0.98); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+/* Vistas imprimibles (presupuesto, receta, consentimiento, recibo) */
+@media print {
+  .no-print { display: none !important; }
+  @page { margin: 14mm; }
+  html, body { background: #fff !important; }
+}
+
+/* Barras de pestañas deslizables sin barra de scroll visible */
+.no-scrollbar { scrollbar-width: none; -ms-overflow-style: none; }
+.no-scrollbar::-webkit-scrollbar { display: none; }

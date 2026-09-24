@@ -22,6 +22,21 @@ export function formatTime(iso: string | Date, tz?: string) {
   return new Intl.DateTimeFormat('es-CO', { timeStyle: 'short', timeZone: tz }).format(d);
 }
 
+/** Pesos colombianos sin decimales: $ 1.250.000 */
+export function formatCop(n: string | number | null | undefined): string {
+  if (n == null || n === '') return '—';
+  return new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(Number(n));
+}
+
+/** Link de WhatsApp (wa.me) con mensaje prellenado. Normaliza números de Colombia. */
+export function whatsappLink(phone: string | null | undefined, message: string): string | null {
+  if (!phone) return null;
+  let digits = phone.replace(/\D/g, '');
+  if (digits.length === 10 && digits.startsWith('3')) digits = `57${digits}`;
+  if (digits.length < 10) return null;
+  return `https://wa.me/${digits}?text=${encodeURIComponent(message)}`;
+}
+
 export function calcAge(birthdate: string | Date): number {
   const b = typeof birthdate === 'string' ? new Date(birthdate) : birthdate;
   const now = new Date();

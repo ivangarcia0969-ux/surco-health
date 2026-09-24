@@ -1,5 +1,5 @@
 'use client';
-import { Sidebar } from '@/components/layout/Sidebar';
+import { Sidebar, MobileNav } from '@/components/layout/Sidebar';
 import { useAuthGuard } from '@/hooks/useAuthGuard';
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
@@ -12,8 +12,9 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex min-h-screen bg-gray-50">
       <Sidebar role={user!.role} specialty={user!.specialty} />
-      <main className="flex-1">
-        <div className="mx-auto max-w-7xl px-4 py-6 md:px-8">{children}</div>
+      <main className="min-w-0 flex-1">
+        <MobileNav role={user!.role} />
+        <div className="mx-auto max-w-7xl px-4 pb-24 pt-5 md:px-8 md:py-6">{children}</div>
       </main>
     </div>
   );

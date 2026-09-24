@@ -9,7 +9,16 @@ import type { UpdateTenantInput, CreateSiteInput, CreateRoomInput } from '@surco
 export async function getMyTenant(tenantId: string, role?: string | null) {
   const tenant = await prisma.tenant.findUnique({
     where: { id: tenantId },
-    include: { plan: true },
+    include: {
+      plan: true,
+      // Sede principal primero: sus datos van en el encabezado de los
+      // documentos imprimibles (presupuesto, receta, consentimiento, recibo).
+      sites: {
+        where: { isActive: true },
+        orderBy: [{ isMain: 'desc' }, { createdAt: 'asc' }],
+        select: { id: true, name: true, address: true, phone: true, email: true, isMain: true },
+      },
+    },
   });
   if (!tenant) throw new AppError('TENANT_NOT_FOUND', 404);
 

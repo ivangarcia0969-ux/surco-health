@@ -2,11 +2,34 @@
 
 > **Documento maestro** que captura todo el trabajo realizado, decisiones tomadas, infraestructura y status de los proyectos SaaS de Iván García.
 >
-> **Última actualización:** 2026-06-09 (Branding + temas visuales + control de prueba + escalabilidad DB — ambas apps vendibles ✅)
+> **Última actualización:** 2026-09-24 (Surco Health: módulo odontológico completo para demo de venta — agenda/atender, plan y presupuesto, caja, recetas, consentimientos, radiografías)
 >
 > Este archivo vive en ambos repos (`Barbershop` y `surco-health`) y se mantiene sincronizado por Git para no perder contexto entre sesiones.
 
 ## 🏁 HITOS POR FECHA
+
+### 2026-09-24 — Surco Health: paquete odontológico completo (demo de venta)
+- **Guía de demo:** `docs/DEMO-ODONTOLOGIA.md` (credenciales, guion de 12 min, cómo refrescar datos y publicar).
+- **Datos demo:** `packages/db/prisma/seed-demo-dental.ts` → `pnpm --filter @surco/db db:seed:demo`. Clínica
+  "Clínica Dental Sonrisa" (slug `sonrisa`, plan CLINICA +1 año), 2 odontólogos, recepción, 14 servicios con
+  precios COP, 14 pacientes con odontograma/plan/abonos/receta, agenda de HOY y MAÑANA (se regenera en cada
+  corrida sin duplicar). Usuarios `*@sonrisa.demo`, contraseña `DEMO_PASSWORD` o `Sonrisa2026*`.
+- **API nuevos:** `billing` (recibos de caja RC-xxxxxx sobre Invoice+Payment, estado de cuenta, resumen,
+  hora Colombia), `prescriptions` (+ firma del profesional en `User.signatureImageUrl`), `consents`
+  (8 plantillas por defecto auto-creadas por clínica, firma PNG, SHA-256, IP/UA), `files` (multipart 25 MB,
+  MinIO interno vía `plugins/storage.ts`, fallback a disco `storage-local/` en desarrollo). Sin cambios de schema.
+- **Web nuevo:** `/caja`, `/mi-perfil`, `/imprimir/{presupuesto,recibo,receta,consentimiento}` (layout sin menú,
+  `PrintShell` con encabezado de la clínica), ficha del paciente con 9 pestañas y modo **Atender**
+  (`/pacientes/[id]?atender=<citaId>`), agenda renovada (Atender, Llegó, recordatorio WhatsApp wa.me,
+  buscador de pacientes, servicios con precio), inicio con KPIs de dinero y gráfica, menú inferior en celular.
+- **Buenas prácticas traídas de otros proyectos:** pad de firma de ASM (`SignaturePad`: escala DPR fija,
+  valida tinta real), vistas imprimibles y toasts de Garrapata, saludo/KPIs del panel de Garrapata.
+- **Bugs corregidos:** (1) recargar cualquier página mandaba al login (`useAuthGuard` no esperaba la
+  hidratación de zustand/persist); (2) el menú del odontólogo apuntaba a `/mi-agenda` (404); (3) paleta
+  `brand-300/400/800` no existía → 15 elementos invisibles; (4) logo invisible en celular por id de degradado
+  SVG duplicado; (5) ficha de paciente se colgaba para recepción (pedía HCE sin permiso); (6) el formulario de
+  cita no cargaba servicios.
+- **Pendiente:** publicar en el VPS (`bash infra/scripts/deploy.sh` + `db:seed:demo`), ver guía.
 
 ### 2026-06-09 — Branding, temas visuales, control de prueba y escalabilidad
 - **Rebrand barbería → "Fígaro App"** (antes "SaaS Barberías"/"BarberPro"). Logo tijeras doradas.

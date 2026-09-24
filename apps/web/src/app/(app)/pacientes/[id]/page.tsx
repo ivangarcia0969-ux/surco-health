@@ -1,8 +1,14 @@
 'use client';
-import { useCallback, useEffect, useState } from 'react';
-import { useParams } from 'next/navigation';
+import { Suspense, useCallback, useEffect, useRef, useState } from 'react';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { apiFetch } from '@/lib/api';
+import { toast, errorMessage } from '@/components/ui/Toaster';
+import { PatientAccount } from '@/components/billing/PatientAccount';
+import { PatientFiles } from '@/components/clinical/PatientFiles';
+import { PrescriptionsPanel } from '@/components/clinical/PrescriptionsPanel';
+import { ConsentsPanel } from '@/components/clinical/ConsentsPanel';
+import { DentalProcedureForm } from '@/components/clinical/DentalProcedureForm';
 import { Card, CardTitle } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Odontogram, ConditionPalette, type Condition, type ChartState } from '@/components/clinical/Odontogram';
@@ -11,7 +17,7 @@ import { EvolutionNoteForm } from '@/components/clinical/EvolutionNoteForm';
 import { SoapNoteForm } from '@/components/clinical/SoapNoteForm';
 import { PsychometricTestForm } from '@/components/clinical/PsychometricTestForm';
 import { DentalTreatmentPlan } from '@/components/clinical/DentalTreatmentPlan';
-import { calcAge, cn, formatDate, formatDateTime } from '@/lib/utils';
+import { calcAge, cn, formatDate, formatDateTime, formatTime, whatsappLink } from '@/lib/utils';
 import { useAuth } from '@/lib/auth-store';
 
 interface Patient {
@@ -62,79 +68,258 @@ interface ClinicalRecord {
   dentalProcedures?: any[];
 }
 
-type Tab = 'overview' | 'records' | 'odontogram' | 'dental-plan' | 'vitals';
+type Tab =
+  | 'overview' | 'records' | 'odontogram' | 'dental-plan' | 'payments'
+  | 'files' | 'prescriptions' | 'consents' | 'vitals';
+
+interface Appt {
+  id: string; startsAt: string; endsAt: string; status: string;
+  service?: { name: string } | null;
+  professional: { id: string; fullName: string };
+}
+
+const CLINICAL_ROLES = ['CLINIC_OWNER', 'PROFESSIONAL'];
 
 export default function PatientDetailPage() {
+  return (
+    <Suspense fallback={<Card className="h-40 animate-pulse bg-gray-100" />}>
+      <PatientDetail />
+    </Suspense>
+  );
+}
+
+function PatientDetail() {
   const { id } = useParams<{ id: string }>();
+  const search = useSearchParams();
+  const router = useRouter();
+  const role = useAuth((s) => s.user?.role);
+  const isClinical = CLINICAL_ROLES.includes(role ?? '');
+  const attendId = search.get('atender');
+
   const [patient, setPatient] = useState<Patient | null>(null);
   const [records, setRecords] = useState<ClinicalRecord[]>([]);
-  const [tab, setTab] = useState<Tab>('overview');
+  const [appts, setAppts] = useState<Appt[]>([]);
+  const [tab, setTab] = useState<Tab>(() => (search.get('tab') as Tab) || (attendId ? 'odontogram' : 'overview'));
   const [loading, setLoading] = useState(true);
+  const [notFound, setNotFound] = useState(false);
 
   const load = useCallback(async () => {
-    const [p, r] = await Promise.all([
-      apiFetch<Patient>(`/api/patients/${id}`),
-      apiFetch<ClinicalRecord[]>(`/api/clinical/records?patientId=${id}`),
-    ]);
-    setPatient(p); setRecords(r);
-    setLoading(false);
-  }, [id]);
+    try {
+      const [p, r, a] = await Promise.all([
+        apiFetch<Patient>(`/api/patients/${id}`),
+        isClinical
+          ? apiFetch<ClinicalRecord[]>(`/api/clinical/records?patientId=${id}`).catch(() => [] as ClinicalRecord[])
+          : Promise.resolve([] as ClinicalRecord[]),
+        apiFetch<Appt[]>(`/api/appointments?patientId=${id}`).catch(() => [] as Appt[]),
+      ]);
+      setPatient(p); setRecords(r); setAppts(a);
+    } catch {
+      setNotFound(true);
+    } finally {
+      setLoading(false);
+    }
+  }, [id, isClinical]);
 
   useEffect(() => { load(); }, [load]);
 
-  if (loading) return <Card className="text-sm text-gray-500">Cargando…</Card>;
-  if (!patient) return <Card className="text-sm text-red-600">Paciente no encontrado.</Card>;
+  // La pestaña queda en la URL: al volver de un documento imprimible se conserva
+  function selectTab(t: Tab) {
+    setTab(t);
+    const params = new URLSearchParams(search.toString());
+    params.set('tab', t);
+    router.replace(`/pacientes/${id}?${params.toString()}`, { scroll: false });
+  }
+
+  const attending = attendId ? appts.find((a) => a.id === attendId) ?? null : null;
+
+  // Al entrar en modo "Atender", la cita pasa a "En curso"
+  useEffect(() => {
+    if (!attending || !isClinical) return;
+    if (attending.status === 'CONFIRMED' || attending.status === 'CHECKED_IN' || attending.status === 'REQUESTED') {
+      apiFetch(`/api/appointments/${attending.id}`, { method: 'PATCH', body: { status: 'IN_PROGRESS' } })
+        .then(() => setAppts((prev) => prev.map((x) => (x.id === attending.id ? { ...x, status: 'IN_PROGRESS' } : x))))
+        .catch(() => {/* sin permiso: seguimos igual */});
+    }
+  }, [attending, isClinical]);
+
+  if (loading) {
+    return (
+      <div className="space-y-4">
+        <div className="h-5 w-24 animate-pulse rounded bg-gray-200" />
+        <div className="h-32 animate-pulse rounded-2xl bg-gray-100" />
+        <div className="h-10 animate-pulse rounded-xl bg-gray-100" />
+        <div className="h-64 animate-pulse rounded-2xl bg-gray-100" />
+      </div>
+    );
+  }
+  if (notFound || !patient) return <Card className="text-sm text-red-600">Paciente no encontrado.</Card>;
+
+  const wa = whatsappLink(patient.phone, `Hola ${patient.fullName.split(' ')[0]}, te escribimos de tu consultorio. `);
+  const todayStart = new Date(new Date().toDateString());
+  const upcoming = appts
+    .filter((a) => new Date(a.startsAt) >= todayStart && !['CANCELLED', 'NO_SHOW', 'ATTENDED'].includes(a.status))
+    .sort((a, b) => a.startsAt.localeCompare(b.startsAt));
+
+  const tabs: { key: Tab; label: string; show: boolean }[] = [
+    { key: 'overview', label: 'Resumen', show: true },
+    { key: 'odontogram', label: '🦷 Odontograma', show: isClinical },
+    { key: 'dental-plan', label: 'Plan y presupuesto', show: true },
+    { key: 'payments', label: '💵 Pagos', show: true },
+    { key: 'records', label: `Historia clínica (${records.length})`, show: isClinical },
+    { key: 'files', label: '🩻 Radiografías', show: isClinical },
+    { key: 'prescriptions', label: '💊 Recetas', show: isClinical },
+    { key: 'consents', label: '✍️ Consentimientos', show: role !== 'BILLING' },
+    { key: 'vitals', label: 'Signos vitales', show: isClinical },
+  ];
 
   return (
     <div className="space-y-6">
       <Link href="/pacientes" className="text-sm text-brand-600 hover:underline">← Pacientes</Link>
 
+      {attending && (
+        <AttendBanner
+          appt={attending}
+          patientId={patient.id}
+          onDone={() => { toast.success('Atención finalizada'); router.push('/agenda'); }}
+          onChanged={load}
+        />
+      )}
+
       <Card>
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <h1 className="text-2xl font-bold text-gray-900">{patient.fullName}</h1>
-            <p className="text-sm text-gray-500">
-              {patient.documentType} {patient.documentId} · {calcAge(patient.birthdate)} años · {translateGender(patient.gender)}
-            </p>
-            <p className="text-xs text-gray-500">
-              {patient.phone ?? 'Sin teléfono'} {patient.email ? `· ${patient.email}` : ''}
-            </p>
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div className="flex items-start gap-4">
+            <span className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-brand-100 text-lg font-bold text-brand-700">
+              {patient.fullName.split(' ').slice(0, 2).map((n) => n[0]).join('').toUpperCase()}
+            </span>
+            <div>
+              <h1 className="text-2xl font-bold text-gray-900">{patient.fullName}</h1>
+              <p className="text-sm text-gray-500">
+                {patient.documentType} {patient.documentId} · {calcAge(patient.birthdate)} años · {translateGender(patient.gender)}
+              </p>
+              <p className="text-xs text-gray-500">
+                {patient.phone ?? 'Sin teléfono'} {patient.email ? `· ${patient.email}` : ''}
+                {patient.insurerName ? ` · ${patient.insurerName}` : ''}
+              </p>
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                {patient.bloodType !== 'UNKNOWN' && (
+                  <span className="rounded-full bg-red-50 px-2.5 py-0.5 text-xs font-medium text-red-700">
+                    🩸 {patient.bloodType.replace('_POS', '+').replace('_NEG', '−')}
+                  </span>
+                )}
+                {patient.allergiesSummary && (
+                  <span className="rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-semibold text-amber-800">
+                    ⚠️ Alergias: {patient.allergiesSummary}
+                  </span>
+                )}
+                {upcoming[0] && (
+                  <span className="rounded-full bg-brand-50 px-2.5 py-0.5 text-xs font-medium text-brand-700">
+                    📅 Próxima cita: {formatDateTime(upcoming[0].startsAt)}
+                  </span>
+                )}
+              </div>
+            </div>
           </div>
-          <div className="text-right">
-            {patient.bloodType !== 'UNKNOWN' && (
-              <span className="rounded-full bg-red-50 px-3 py-1 text-xs font-medium text-red-700">
-                Sangre: {patient.bloodType.replace('_POS', '+').replace('_NEG', '−')}
-              </span>
+          <div className="flex flex-wrap gap-2">
+            {wa && (
+              <a href={wa} target="_blank" rel="noreferrer"
+                 className="inline-flex items-center gap-1.5 rounded-lg bg-[#25D366] px-3 py-2 text-sm font-semibold text-white shadow-sm hover:brightness-95">
+                WhatsApp
+              </a>
             )}
-            {patient.allergiesSummary && (
-              <p className="mt-1 text-xs text-amber-700">⚠️ Alergias: {patient.allergiesSummary}</p>
-            )}
+            <Link href={`/agenda?paciente=${patient.id}`}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-800 shadow-sm hover:bg-gray-50">
+              📅 Agendar cita
+            </Link>
           </div>
         </div>
       </Card>
 
-      <div className="border-b border-gray-200">
-        <nav className="-mb-px flex gap-6 text-sm">
-          <TabBtn active={tab === 'overview'} onClick={() => setTab('overview')}>Resumen</TabBtn>
-          <TabBtn active={tab === 'records'} onClick={() => setTab('records')}>HCE ({records.length})</TabBtn>
-          <TabBtn active={tab === 'odontogram'} onClick={() => setTab('odontogram')}>Odontograma</TabBtn>
-          <TabBtn active={tab === 'dental-plan'} onClick={() => setTab('dental-plan')}>Plan dental</TabBtn>
-          <TabBtn active={tab === 'vitals'} onClick={() => setTab('vitals')}>Signos vitales</TabBtn>
+      <div className="no-scrollbar -mx-4 overflow-x-auto border-b border-gray-200 px-4 md:mx-0 md:px-0">
+        <nav className="-mb-px flex min-w-max gap-5 text-sm">
+          {tabs.filter((t) => t.show).map((t) => (
+            <TabBtn key={t.key} active={tab === t.key} onClick={() => selectTab(t.key)}>{t.label}</TabBtn>
+          ))}
         </nav>
       </div>
 
-      {tab === 'overview' && <OverviewTab patient={patient} />}
-      {tab === 'records' && <RecordsTab records={records} patientId={patient.id} onSaved={load} />}
-      {tab === 'odontogram' && <OdontogramTab patient={patient} onSaved={load} />}
-      {tab === 'dental-plan' && <DentalTreatmentPlan patientId={patient.id} />}
-      {tab === 'vitals' && <VitalSignsTab patientId={patient.id} onSaved={load} />}
+      {tab === 'overview' && <OverviewTab patient={patient} upcoming={upcoming} />}
+      {tab === 'records' && isClinical && <RecordsTab records={records} patientId={patient.id} appointmentId={attending?.id} onSaved={load} />}
+      {tab === 'odontogram' && isClinical && <OdontogramTab patient={patient} appointmentId={attending?.id} onSaved={load} />}
+      {tab === 'dental-plan' && <DentalTreatmentPlan patientId={patient.id} appointmentId={attending?.id} onChanged={load} />}
+      {tab === 'payments' && <PatientAccount patientId={patient.id} />}
+      {tab === 'files' && isClinical && <PatientFiles patientId={patient.id} />}
+      {tab === 'prescriptions' && isClinical && <PrescriptionsPanel patientId={patient.id} allergies={patient.allergiesSummary} />}
+      {tab === 'consents' && <ConsentsPanel patientId={patient.id} />}
+      {tab === 'vitals' && isClinical && <VitalSignsTab patientId={patient.id} onSaved={load} />}
+    </div>
+  );
+}
+
+/** Barra fija mientras el profesional atiende una cita (entró desde "Atender" en la agenda). */
+function AttendBanner({ appt, patientId, onDone, onChanged }: {
+  appt: Appt; patientId: string; onDone: () => void; onChanged: () => void;
+}) {
+  const [openConsult, setOpenConsult] = useState(false);
+  const [openProc, setOpenProc] = useState(false);
+  const [finishing, setFinishing] = useState(false);
+
+  async function finish() {
+    setFinishing(true);
+    try {
+      await apiFetch(`/api/appointments/${appt.id}`, { method: 'PATCH', body: { status: 'ATTENDED' } });
+      onDone();
+    } catch (err) {
+      toast.error(errorMessage(err, 'No fue posible finalizar la atención.'));
+    } finally {
+      setFinishing(false);
+    }
+  }
+
+  const done = appt.status === 'ATTENDED';
+
+  return (
+    <div className="sticky top-2 z-30 rounded-2xl border border-brand-200 bg-gradient-to-r from-brand-600 to-brand-700 p-4 text-white shadow-lg">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <span className="relative flex h-3 w-3">
+            {!done && <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-white/70" />}
+            <span className="relative inline-flex h-3 w-3 rounded-full bg-white" />
+          </span>
+          <div>
+            <div className="text-sm font-semibold">{done ? 'Cita atendida' : 'Atendiendo cita'}</div>
+            <div className="text-xs text-white/80">
+              {formatTime(appt.startsAt)} – {formatTime(appt.endsAt)} · {appt.service?.name ?? 'Consulta'} · {appt.professional.fullName}
+            </div>
+          </div>
+        </div>
+        {!done && (
+          <div className="flex flex-wrap gap-2">
+            <button onClick={() => setOpenConsult(true)} className="rounded-lg bg-white/15 px-3 py-1.5 text-sm font-medium hover:bg-white/25">🩺 Registrar consulta</button>
+            <button onClick={() => setOpenProc(true)} className="rounded-lg bg-white/15 px-3 py-1.5 text-sm font-medium hover:bg-white/25">🦷 Procedimientos</button>
+            <button onClick={finish} disabled={finishing}
+                    className="rounded-lg bg-white px-3 py-1.5 text-sm font-semibold text-brand-700 shadow-sm hover:bg-brand-50 disabled:opacity-60">
+              {finishing ? 'Finalizando…' : '✓ Finalizar atención'}
+            </button>
+          </div>
+        )}
+      </div>
+      <ConsultationForm open={openConsult} onClose={() => setOpenConsult(false)}
+                        onCreated={() => { toast.success('Consulta registrada en la historia clínica'); onChanged(); }}
+                        patientId={patientId} appointmentId={appt.id} />
+      <DentalProcedureForm open={openProc} onClose={() => setOpenProc(false)} onCreated={onChanged}
+                           patientId={patientId} appointmentId={appt.id} />
     </div>
   );
 }
 
 function TabBtn({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
+  const ref = useRef<HTMLButtonElement>(null);
+  // En pantallas angostas las pestañas se deslizan: mantener visible la activa
+  useEffect(() => {
+    if (active) ref.current?.scrollIntoView({ inline: 'center', block: 'nearest' });
+  }, [active]);
   return (
-    <button onClick={onClick}
+    <button ref={ref} onClick={onClick}
             className={cn(
               'border-b-2 px-1 py-3 font-medium transition',
               active ? 'border-brand-500 text-brand-700' : 'border-transparent text-gray-600 hover:text-gray-800',
@@ -148,9 +333,10 @@ function translateGender(g: string) {
   return { MALE: 'Masculino', FEMALE: 'Femenino', NON_BINARY: 'No binario', PREFER_NOT_TO_SAY: 'Prefiere no decir', OTHER: 'Otro' }[g] ?? g;
 }
 
-function OverviewTab({ patient }: { patient: Patient }) {
+function OverviewTab({ patient, upcoming }: { patient: Patient; upcoming: Appt[] }) {
   return (
-    <Card>
+    <div className="grid gap-4 lg:grid-cols-3">
+    <Card className="lg:col-span-2">
       <CardTitle>Información del paciente</CardTitle>
       <dl className="mt-4 grid grid-cols-1 gap-x-6 gap-y-2 text-sm md:grid-cols-2">
         <Field label="Documento">{patient.documentType} {patient.documentId}</Field>
@@ -164,6 +350,22 @@ function OverviewTab({ patient }: { patient: Patient }) {
         </Field>
       </dl>
     </Card>
+    <Card>
+      <CardTitle>Próximas citas</CardTitle>
+      {upcoming.length === 0 ? (
+        <p className="mt-3 text-sm text-gray-500">Sin citas programadas.</p>
+      ) : (
+        <ul className="mt-3 space-y-2">
+          {upcoming.slice(0, 5).map((a) => (
+            <li key={a.id} className="rounded-xl border border-gray-100 px-3 py-2">
+              <div className="text-sm font-medium text-gray-900">{formatDateTime(a.startsAt)}</div>
+              <div className="text-xs text-gray-500">{a.service?.name ?? 'Consulta'} · {a.professional.fullName}</div>
+            </li>
+          ))}
+        </ul>
+      )}
+    </Card>
+    </div>
   );
 }
 
@@ -177,8 +379,8 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 }
 
 function RecordsTab({
-  records, patientId, onSaved,
-}: { records: ClinicalRecord[]; patientId: string; onSaved: () => void }) {
+  records, patientId, appointmentId, onSaved,
+}: { records: ClinicalRecord[]; patientId: string; appointmentId?: string; onSaved: () => void }) {
   const role = useAuth((s) => s.user?.role);
   const specialty = useAuth((s) => s.user?.specialty);
   const canCreate = role === 'PROFESSIONAL' || role === 'CLINIC_OWNER';
@@ -263,6 +465,7 @@ function RecordsTab({
             onClose={() => setOpenConsult(false)}
             onCreated={onSaved}
             patientId={patientId}
+            appointmentId={appointmentId}
           />
           <EvolutionNoteForm
             open={openEvolution}
@@ -463,11 +666,17 @@ function translateType(t: string) {
   return map[t] ?? t;
 }
 
-function OdontogramTab({ patient, onSaved }: { patient: Patient; onSaved: () => void }) {
+function OdontogramTab({ patient, appointmentId, onSaved }: { patient: Patient; appointmentId?: string; onSaved: () => void }) {
   const [state, setState] = useState<ChartState>((patient.dentalChart?.state ?? {}) as ChartState);
   const [selectedCondition, setSelectedCondition] = useState<Condition>('CARIES');
   const [saving, setSaving] = useState(false);
-  const [msg, setMsg] = useState<string | null>(null);
+  const [dirty, setDirty] = useState(false);
+  const [openProc, setOpenProc] = useState(false);
+
+  // Si el plan de tratamiento actualiza el odontograma, reflejarlo
+  useEffect(() => {
+    if (!dirty) setState((patient.dentalChart?.state ?? {}) as ChartState);
+  }, [patient.dentalChart, dirty]);
 
   async function save() {
     setSaving(true);
@@ -476,33 +685,45 @@ function OdontogramTab({ patient, onSaved }: { patient: Patient; onSaved: () => 
         method: 'PUT',
         body: { state, numbering: 'FDI' },
       });
-      setMsg('✓ Odontograma actualizado');
+      toast.success('Odontograma guardado');
+      setDirty(false);
       onSaved();
-      setTimeout(() => setMsg(null), 2000);
-    } catch {
-      setMsg('Error al guardar');
+    } catch (err) {
+      toast.error(errorMessage(err, 'No fue posible guardar el odontograma.'));
     } finally {
       setSaving(false);
     }
   }
 
+  const findings = Object.values(state).reduce((n, t) => n + Object.values(t ?? {}).filter((c) => c && c !== 'HEALTHY').length, 0);
+
   return (
     <div className="space-y-4">
       <Card>
-        <CardTitle>Selecciona condición y haz click en las superficies de los dientes</CardTitle>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <CardTitle>Odontograma (notación FDI)</CardTitle>
+            <p className="mt-1 text-xs text-gray-500">Elige una condición y toca las superficies de cada diente. {findings} hallazgo{findings === 1 ? '' : 's'} registrado{findings === 1 ? '' : 's'}.</p>
+          </div>
+          <Button variant="secondary" size="sm" onClick={() => setOpenProc(true)}>🦷 Agregar al plan de tratamiento</Button>
+        </div>
         <div className="mt-3">
           <ConditionPalette selected={selectedCondition} onSelect={setSelectedCondition} />
         </div>
       </Card>
 
-      <Card>
-        <Odontogram state={state} onChange={setState} selectedCondition={selectedCondition} />
+      <Card className="overflow-x-auto">
+        <Odontogram state={state} onChange={(s) => { setState(s); setDirty(true); }} selectedCondition={selectedCondition} />
       </Card>
 
       <div className="flex items-center justify-end gap-3">
-        {msg && <span className={cn('text-sm', msg.startsWith('✓') ? 'text-green-700' : 'text-red-700')}>{msg}</span>}
-        <Button onClick={save} loading={saving}>Guardar odontograma</Button>
+        {dirty && <span className="text-sm text-amber-700">Cambios sin guardar</span>}
+        <Button onClick={save} loading={saving} disabled={!dirty}>Guardar odontograma</Button>
       </div>
+
+      <DentalProcedureForm open={openProc} onClose={() => setOpenProc(false)}
+                           onCreated={() => { setDirty(false); onSaved(); }}
+                           patientId={patient.id} appointmentId={appointmentId} />
     </div>
   );
 }
@@ -513,7 +734,6 @@ function VitalSignsTab({ patientId, onSaved }: { patientId: string; onSaved: () 
     temperatureC: '', oxygenSaturation: '', weightKg: '', heightCm: '',
   });
   const [saving, setSaving] = useState(false);
-  const [msg, setMsg] = useState<string | null>(null);
 
   async function save() {
     setSaving(true);
@@ -526,11 +746,10 @@ function VitalSignsTab({ patientId, onSaved }: { patientId: string; onSaved: () 
         method: 'POST',
         body: { patientId, vitals: cleaned },
       });
-      setMsg('✓ Signos vitales registrados');
+      toast.success('Signos vitales registrados');
       setVitals({ systolicMmHg: '', diastolicMmHg: '', heartRate: '', temperatureC: '', oxygenSaturation: '', weightKg: '', heightCm: '' });
       onSaved();
-      setTimeout(() => setMsg(null), 2000);
-    } catch { setMsg('Error al guardar'); }
+    } catch (err) { toast.error(errorMessage(err, 'No fue posible guardar.')); }
     finally { setSaving(false); }
   }
 
@@ -557,7 +776,6 @@ function VitalSignsTab({ patientId, onSaved }: { patientId: string; onSaved: () 
         )}
       </div>
       <div className="mt-4 flex items-center justify-end gap-3">
-        {msg && <span className={cn('text-sm', msg.startsWith('✓') ? 'text-green-700' : 'text-red-700')}>{msg}</span>}
         <Button onClick={save} loading={saving}>Registrar</Button>
       </div>
     </Card>

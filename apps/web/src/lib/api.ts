@@ -72,3 +72,41 @@ export async function apiFetch<T = unknown>(path: string, opts: ApiOptions = {})
   if (res.status === 204) return undefined as T;
   return res.json() as Promise<T>;
 }
+
+/**
+ * Petición autenticada "cruda" (sin JSON): sirve para subir FormData
+ * (multipart) o descargar binarios (imágenes, PDF) con el token.
+ */
+async function rawFetch(path: string, init: RequestInit = {}): Promise<Response> {
+  const doRequest = async (t: string | null) =>
+    fetch(`${API_URL}${path}`, {
+      ...init,
+      headers: { ...(t ? { Authorization: `Bearer ${t}` } : {}), ...(init.headers ?? {}) },
+      cache: 'no-store',
+    });
+  const token = useAuth.getState().accessToken;
+  let res = await doRequest(token);
+  if (res.status === 401 && token) {
+    const newToken = await refreshAccessToken();
+    if (newToken) res = await doRequest(newToken);
+  }
+  if (!res.ok) {
+    let payload: any = null;
+    try { payload = await res.json(); } catch {/* */}
+    throw new ApiError(payload?.error ?? `HTTP_${res.status}`, res.status, payload?.details);
+  }
+  return res;
+}
+
+/** Sube un FormData (multipart) y devuelve el JSON de respuesta. */
+export async function apiUpload<T = unknown>(path: string, form: FormData): Promise<T> {
+  const res = await rawFetch(path, { method: 'POST', body: form });
+  return res.json() as Promise<T>;
+}
+
+/** Descarga un binario autenticado y devuelve un object URL (revocar al desmontar). */
+export async function apiBlobUrl(path: string): Promise<string> {
+  const res = await rawFetch(path);
+  const blob = await res.blob();
+  return URL.createObjectURL(blob);
+}

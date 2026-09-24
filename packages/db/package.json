@@ -17,7 +17,8 @@
     "type-check": "tsc --noEmit",
     "prisma": "prisma",
     "db:seed": "tsx prisma/seed.ts",
-    "db:seed:icd10": "tsx prisma/seed-icd10.ts"
+    "db:seed:icd10": "tsx prisma/seed-icd10.ts",
+    "db:seed:demo": "tsx prisma/seed-demo-dental.ts"
   },
   "dependencies": {
     "@prisma/client": "^5.20.0"

@@ -1,10 +1,14 @@
 'use client';
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
 import { apiFetch } from '@/lib/api';
-import { Card, CardTitle } from '@/components/ui/Card';
+import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
-import { cn, formatDate } from '@/lib/utils';
+import { toast, errorMessage } from '@/components/ui/Toaster';
+import { cn, formatCop, formatDate } from '@/lib/utils';
 import { useAuth } from '@/lib/auth-store';
+import { DentalProcedureForm } from './DentalProcedureForm';
+import { PaymentForm, usePatientAccount } from '@/components/billing/PatientAccount';
 
 interface DentalProcedure {
   id: string;
@@ -23,15 +27,15 @@ interface DentalProcedure {
 }
 
 const CONDITION_LABEL: Record<string, string> = {
-  HEALTHY: 'Sano',
+  HEALTHY: 'General / profilaxis',
   CARIES: 'Caries',
-  FILLING_AMALGAM: 'Obturación amalgama',
-  FILLING_RESIN: 'Obturación resina',
+  FILLING_AMALGAM: 'Amalgama',
+  FILLING_RESIN: 'Resina',
   FILLING_TEMP: 'Obturación temporal',
   CROWN: 'Corona',
   IMPLANT: 'Implante',
   EXTRACTION_NEEDED: 'Extracción necesaria',
-  EXTRACTED: 'Extraído',
+  EXTRACTED: 'Exodoncia',
   ROOT_CANAL: 'Endodoncia',
   BRIDGE: 'Puente',
   SEALANT: 'Sellante',
@@ -47,14 +51,18 @@ const STATUS_INFO: Record<DentalProcedure['status'], { label: string; color: str
   CANCELLED:   { label: 'Cancelado',   color: 'bg-red-100 text-red-700 border-red-200',        icon: '❌' },
 };
 
-function formatCop(n: string | number | null | undefined): string {
-  if (n == null) return '—';
-  return new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(Number(n));
-}
-
-export function DentalTreatmentPlan({ patientId }: { patientId: string }) {
+export function DentalTreatmentPlan({ patientId, appointmentId, onChanged }: {
+  patientId: string;
+  /** Si se está atendiendo una cita, los procedimientos quedan ligados a ella. */
+  appointmentId?: string;
+  /** Avisar al padre (p.ej. recargar odontograma / HCE). */
+  onChanged?: () => void;
+}) {
   const role = useAuth((s) => s.user?.role);
   const canEdit = role === 'PROFESSIONAL' || role === 'CLINIC_OWNER';
+  const { account, reload: reloadAccount } = usePatientAccount(patientId);
+  const [openAdd, setOpenAdd] = useState(false);
+  const [openPay, setOpenPay] = useState(false);
 
   const [procedures, setProcedures] = useState<DentalProcedure[]>([]);
   const [loading, setLoading] = useState(true);
@@ -96,35 +104,81 @@ export function DentalTreatmentPlan({ patientId }: { patientId: string }) {
   }, [procedures]);
 
   async function updateStatus(id: string, status: DentalProcedure['status']) {
-    await apiFetch(`/api/dental/procedures/${id}/status`, {
-      method: 'PATCH', body: { status },
-    });
-    load();
+    try {
+      await apiFetch(`/api/dental/procedures/${id}/status`, {
+        method: 'PATCH', body: { status },
+      });
+      toast.success(status === 'COMPLETED' ? 'Procedimiento terminado' : status === 'CANCELLED' ? 'Procedimiento cancelado' : 'Procedimiento iniciado');
+      load(); reloadAccount(); onChanged?.();
+    } catch (err) {
+      toast.error(errorMessage(err));
+    }
   }
 
-  if (loading) return <Card className="text-sm text-gray-500">Cargando plan de tratamiento…</Card>;
+  function afterAdd() { load(); reloadAccount(); onChanged?.(); }
+
+  const actions = (
+    <div className="flex flex-wrap gap-2">
+      {canEdit && <Button onClick={() => setOpenAdd(true)}>+ Agregar procedimientos</Button>}
+      {procedures.length > 0 && (
+        <>
+          <Link href={`/imprimir/presupuesto/${patientId}`} target="_blank"
+                className="inline-flex items-center gap-1 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-800 shadow-sm hover:bg-gray-50">
+            📄 Presupuesto / PDF
+          </Link>
+          <Button variant="secondary" onClick={() => setOpenPay(true)}>💵 Registrar abono</Button>
+        </>
+      )}
+    </div>
+  );
+
+  const modals = (
+    <>
+      <DentalProcedureForm open={openAdd} onClose={() => setOpenAdd(false)} onCreated={afterAdd}
+                           patientId={patientId} appointmentId={appointmentId} />
+      <PaymentForm open={openPay} onClose={() => setOpenPay(false)} onCreated={() => reloadAccount()}
+                   patientId={patientId} suggestedAmount={account?.balance || undefined} />
+    </>
+  );
+
+  if (loading) {
+    return (
+      <div className="space-y-3">
+        <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+          {[0, 1, 2, 3].map((i) => <div key={i} className="h-20 animate-pulse rounded-2xl bg-gray-100" />)}
+        </div>
+        <div className="h-48 animate-pulse rounded-2xl bg-gray-100" />
+      </div>
+    );
+  }
 
   if (procedures.length === 0) {
     return (
-      <Card className="text-center py-12">
-        <div className="text-5xl mb-3">🦷</div>
-        <h3 className="font-semibold text-gray-900">Sin plan de tratamiento</h3>
-        <p className="mt-2 text-sm text-gray-500 max-w-md mx-auto">
-          Los procedimientos creados desde una nueva consulta dental con tipo
-          DENTAL_TREATMENT aparecerán aquí con su costo, estado y total del plan.
-        </p>
-      </Card>
+      <>
+        <Card className="py-12 text-center">
+          <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-brand-50 text-4xl">🦷</div>
+          <h3 className="mt-3 font-semibold text-gray-900">Sin plan de tratamiento</h3>
+          <p className="mx-auto mt-2 max-w-md text-sm text-gray-500">
+            Agrega los procedimientos por diente (resinas, endodoncias, coronas…) con su valor.
+            Se genera el presupuesto imprimible y el odontograma se actualiza solo.
+          </p>
+          {canEdit && <Button className="mt-4" onClick={() => setOpenAdd(true)}>+ Agregar procedimientos</Button>}
+        </Card>
+        {modals}
+      </>
     );
   }
 
   return (
     <div className="space-y-4">
+      {actions}
+
       {/* Resumen del plan */}
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-        <SummaryCard label="Procedimientos" value={`${totals.completed}/${totals.total}`} hint={`${totals.planned} planificados`} />
+        <SummaryCard label="Procedimientos" value={`${totals.completed}/${totals.total}`} hint={`${totals.planned} por hacer · ${totals.inProgress} en curso`} />
         <SummaryCard label="Total del plan" value={formatCop(totals.cost)} highlight />
-        <SummaryCard label="Cobrado" value={formatCop(totals.costCompleted)} tone="positive" />
-        <SummaryCard label="Pendiente" value={formatCop(totals.costPending)} tone="warning" />
+        <SummaryCard label="Abonado" value={formatCop(account?.paid ?? 0)} tone="positive" />
+        <SummaryCard label="Saldo pendiente" value={formatCop(account?.balance ?? totals.cost)} tone="warning" />
       </div>
 
       {/* Filtros */}
@@ -160,7 +214,7 @@ export function DentalTreatmentPlan({ patientId }: { patientId: string }) {
           <tbody className="divide-y divide-gray-100">
             {filtered.map((p) => (
               <tr key={p.id} className={p.status === 'CANCELLED' ? 'opacity-50' : ''}>
-                <td className="px-4 py-3 font-mono font-semibold">{p.toothNumber}</td>
+                <td className="px-4 py-3 font-mono font-semibold">{p.toothNumber === 'GEN' ? <span className="font-sans text-xs font-medium text-gray-500">General</span> : p.toothNumber}</td>
                 <td className="px-4 py-3">
                   <div className="font-medium">{CONDITION_LABEL[p.condition] ?? p.condition}</div>
                   {p.surfaces.length > 0 && (
@@ -204,6 +258,7 @@ export function DentalTreatmentPlan({ patientId }: { patientId: string }) {
           </tfoot>
         </table>
       </Card>
+      {modals}
     </div>
   );
 }

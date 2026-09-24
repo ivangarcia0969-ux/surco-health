@@ -1,35 +1,65 @@
 'use client';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
+import Link from 'next/link';
 import { apiFetch } from '@/lib/api';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Modal } from '@/components/ui/Modal';
 import { Input, Select } from '@/components/ui/Input';
-import { addDays, formatTime, isoDate, SPECIALTY_LABEL } from '@/lib/utils';
+import { toast, errorMessage } from '@/components/ui/Toaster';
+import { useAuth } from '@/lib/auth-store';
+import { addDays, cn, formatCop, formatTime, isoDate, SPECIALTY_LABEL, whatsappLink } from '@/lib/utils';
 
 interface Appointment {
   id: string; startsAt: string; endsAt: string; status: string; channel: string;
+  reason?: string | null;
   patient: { id: string; fullName: string; phone?: string | null; documentId: string };
   professional: { id: string; fullName: string; specialty: string | null };
   service?: { id: string; name: string } | null;
   room?: { id: string; name: string } | null;
 }
 
-const STATUS: Record<string, { label: string; classes: string }> = {
-  REQUESTED:   { label: 'Solicitada', classes: 'bg-gray-100 text-gray-700' },
-  CONFIRMED:   { label: 'Confirmada', classes: 'bg-blue-100 text-blue-800' },
-  CHECKED_IN:  { label: 'Check-in', classes: 'bg-indigo-100 text-indigo-800' },
-  IN_PROGRESS: { label: 'En curso', classes: 'bg-yellow-100 text-yellow-800' },
-  ATTENDED:    { label: 'Atendida', classes: 'bg-green-100 text-green-800' },
-  NO_SHOW:     { label: 'No asistió', classes: 'bg-red-100 text-red-700' },
-  CANCELLED:   { label: 'Cancelada', classes: 'bg-gray-200 text-gray-600' },
+const STATUS: Record<string, { label: string; classes: string; dot: string }> = {
+  REQUESTED:   { label: 'Solicitada', classes: 'bg-gray-100 text-gray-700', dot: 'bg-gray-400' },
+  CONFIRMED:   { label: 'Confirmada', classes: 'bg-blue-100 text-blue-800', dot: 'bg-blue-500' },
+  CHECKED_IN:  { label: 'En sala de espera', classes: 'bg-indigo-100 text-indigo-800', dot: 'bg-indigo-500' },
+  IN_PROGRESS: { label: 'En consulta', classes: 'bg-amber-100 text-amber-800', dot: 'bg-amber-500' },
+  ATTENDED:    { label: 'Atendida', classes: 'bg-green-100 text-green-800', dot: 'bg-green-500' },
+  NO_SHOW:     { label: 'No asistió', classes: 'bg-red-100 text-red-700', dot: 'bg-red-500' },
+  CANCELLED:   { label: 'Cancelada', classes: 'bg-gray-200 text-gray-500', dot: 'bg-gray-300' },
 };
 
 export default function AgendaPage() {
+  return (
+    <Suspense fallback={<Card className="h-40 animate-pulse bg-gray-100" />}>
+      <Agenda />
+    </Suspense>
+  );
+}
+
+function Agenda() {
+  const router = useRouter();
+  const search = useSearchParams();
+  const role = useAuth((s) => s.user?.role);
+  const clinical = role === 'CLINIC_OWNER' || role === 'PROFESSIONAL';
   const [date, setDate] = useState(() => isoDate(new Date()));
   const [items, setItems] = useState<Appointment[]>([]);
   const [loading, setLoading] = useState(true);
   const [openForm, setOpenForm] = useState(false);
+  const [presetPatient, setPresetPatient] = useState<string | undefined>(undefined);
+  const [clinicName, setClinicName] = useState('');
+
+  // Desde la ficha del paciente: /agenda?paciente=<id> abre el formulario con el paciente elegido
+  useEffect(() => {
+    const p = search.get('paciente');
+    if (p) { setPresetPatient(p); setOpenForm(true); }
+    else if (search.get('nueva')) setOpenForm(true);
+  }, [search]);
+
+  useEffect(() => {
+    apiFetch<{ tradeName: string }>('/api/tenants/me').then((t) => setClinicName(t.tradeName)).catch(() => {});
+  }, []);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -38,6 +68,8 @@ export default function AgendaPage() {
       const to = new Date(`${date}T23:59:59`).toISOString();
       const res = await apiFetch<Appointment[]>(`/api/appointments?from=${from}&to=${to}`);
       setItems(res);
+    } catch (err) {
+      toast.error(errorMessage(err, 'No fue posible cargar la agenda.'));
     } finally { setLoading(false); }
   }, [date]);
 
@@ -53,9 +85,35 @@ export default function AgendaPage() {
     return Array.from(groups.entries()).map(([id, v]) => ({ id, ...v }));
   }, [items]);
 
-  async function updateStatus(id: string, status: string) {
-    await apiFetch(`/api/appointments/${id}`, { method: 'PATCH', body: { status } });
-    load();
+  const counts = useMemo(() => {
+    const active = items.filter((a) => a.status !== 'CANCELLED');
+    return {
+      total: active.length,
+      attended: items.filter((a) => a.status === 'ATTENDED').length,
+      waiting: items.filter((a) => a.status === 'CHECKED_IN').length,
+      pending: items.filter((a) => ['CONFIRMED', 'REQUESTED'].includes(a.status)).length,
+    };
+  }, [items]);
+
+  async function updateStatus(a: Appointment, status: string) {
+    try {
+      await apiFetch(`/api/appointments/${a.id}`, { method: 'PATCH', body: { status } });
+      toast.success(`${a.patient.fullName}: ${STATUS[status].label.toLowerCase()}`);
+      load();
+    } catch (err) {
+      toast.error(errorMessage(err));
+    }
+  }
+
+  const isToday = date === isoDate(new Date());
+  const longDate = new Intl.DateTimeFormat('es-CO', { weekday: 'long', day: 'numeric', month: 'long' }).format(new Date(`${date}T12:00:00`));
+
+  function reminderLink(a: Appointment) {
+    const when = new Intl.DateTimeFormat('es-CO', { weekday: 'long', day: 'numeric', month: 'long' }).format(new Date(a.startsAt));
+    return whatsappLink(
+      a.patient.phone,
+      `Hola ${a.patient.fullName.split(' ')[0]} 👋, te recordamos tu cita ${a.service ? `de ${a.service.name} ` : ''}el ${when} a las ${formatTime(a.startsAt)} con ${a.professional.fullName}${clinicName ? ` en ${clinicName}` : ''}. Por favor responde SÍ para confirmar. 🦷`,
+    );
   }
 
   return (
@@ -63,68 +121,143 @@ export default function AgendaPage() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Agenda</h1>
-          <p className="text-sm text-gray-500">Citas del día agrupadas por profesional</p>
+          <p className="text-sm text-gray-500 first-letter:uppercase">{longDate}{isToday ? ' · hoy' : ''}</p>
         </div>
-        <Button onClick={() => setOpenForm(true)}>+ Nueva cita</Button>
+        <Button onClick={() => { setPresetPatient(undefined); setOpenForm(true); }}>+ Nueva cita</Button>
       </div>
 
-      <Card className="flex flex-wrap items-center gap-3">
-        <Button size="sm" variant="secondary" onClick={() => setDate(isoDate(addDays(new Date(date), -1)))}>← Anterior</Button>
+      <Card className="flex flex-wrap items-center gap-2 p-4">
+        <Button size="sm" variant="secondary" onClick={() => setDate(isoDate(addDays(new Date(`${date}T12:00:00`), -1)))}>←</Button>
         <input type="date" value={date} onChange={(e) => setDate(e.target.value)}
                className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm" />
-        <Button size="sm" variant="secondary" onClick={() => setDate(isoDate(addDays(new Date(date), 1)))}>Siguiente →</Button>
-        <Button size="sm" variant="ghost" onClick={() => setDate(isoDate(new Date()))}>Hoy</Button>
-        <div className="ml-auto text-sm text-gray-500">{items.length} cita{items.length === 1 ? '' : 's'}</div>
+        <Button size="sm" variant="secondary" onClick={() => setDate(isoDate(addDays(new Date(`${date}T12:00:00`), 1)))}>→</Button>
+        {!isToday && <Button size="sm" variant="ghost" onClick={() => setDate(isoDate(new Date()))}>Hoy</Button>}
+        <div className="ml-auto flex flex-wrap gap-2 text-xs">
+          <Chip label="Citas" value={counts.total} />
+          <Chip label="Por atender" value={counts.pending} tone="blue" />
+          <Chip label="En espera" value={counts.waiting} tone="indigo" />
+          <Chip label="Atendidas" value={counts.attended} tone="green" />
+        </div>
       </Card>
 
-      {loading ? <Card className="text-sm text-gray-500">Cargando…</Card>
-        : items.length === 0 ? <Card className="text-center text-sm text-gray-500">No hay citas para este día.</Card>
-        : (
+      {loading ? (
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+          {[0, 1].map((i) => <div key={i} className="h-64 animate-pulse rounded-2xl bg-gray-100" />)}
+        </div>
+      ) : items.length === 0 ? (
+        <Card className="py-14 text-center">
+          <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-brand-50 text-2xl">🗓️</div>
+          <p className="mt-3 text-sm font-medium text-gray-900">No hay citas para este día</p>
+          <Button className="mt-4" size="sm" onClick={() => setOpenForm(true)}>+ Agendar cita</Button>
+        </Card>
+      ) : (
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
           {byProf.map((g) => (
-            <Card key={g.id}>
-              <h3 className="mb-3 font-semibold text-gray-900">
-                {g.name}
-                {g.specialty && <span className="ml-2 text-xs font-normal text-gray-500">{SPECIALTY_LABEL[g.specialty]}</span>}
-              </h3>
+            <Card key={g.id} className="p-0">
+              <div className="flex items-center justify-between border-b border-gray-100 px-5 py-4">
+                <div>
+                  <h3 className="font-semibold text-gray-900">{g.name}</h3>
+                  {g.specialty && <span className="text-xs text-gray-500">{SPECIALTY_LABEL[g.specialty]}</span>}
+                </div>
+                <span className="rounded-full bg-gray-100 px-2.5 py-0.5 text-xs font-medium text-gray-600">
+                  {g.items.filter((a) => a.status !== 'CANCELLED').length} citas
+                </span>
+              </div>
               <ul className="divide-y divide-gray-100">
                 {g.items
                   .sort((a, b) => a.startsAt.localeCompare(b.startsAt))
-                  .map((a) => (
-                    <li key={a.id} className="flex flex-wrap items-start justify-between gap-2 py-3">
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <span className="font-medium">{formatTime(a.startsAt)} – {formatTime(a.endsAt)}</span>
-                          <span className={'rounded-full px-2 py-0.5 text-xs font-medium ' + STATUS[a.status].classes}>{STATUS[a.status].label}</span>
-                          {a.channel === 'TELEHEALTH' && <span className="text-xs">🎥</span>}
+                  .map((a) => {
+                    const st = STATUS[a.status] ?? STATUS.CONFIRMED;
+                    const wa = ['CONFIRMED', 'REQUESTED'].includes(a.status) ? reminderLink(a) : null;
+                    return (
+                      <li key={a.id} className={cn('flex gap-3 px-5 py-3', a.status === 'CANCELLED' && 'opacity-50')}>
+                        <div className="w-[68px] shrink-0 whitespace-nowrap text-center">
+                          <div className="font-mono text-sm font-semibold text-gray-900">{formatTime(a.startsAt)}</div>
+                          <div className="font-mono text-[11px] text-gray-400">{formatTime(a.endsAt)}</div>
                         </div>
-                        <div className="mt-1 text-sm">{a.patient.fullName}</div>
-                        <div className="text-xs text-gray-500">{a.service?.name ?? 'Sin servicio'} {a.room ? `· ${a.room.name}` : ''}</div>
-                      </div>
-                      <div className="flex gap-1">
-                        {a.status === 'CONFIRMED' && <Button size="sm" variant="secondary" onClick={() => updateStatus(a.id, 'CHECKED_IN')}>Check-in</Button>}
-                        {(a.status === 'CHECKED_IN' || a.status === 'IN_PROGRESS') && <Button size="sm" onClick={() => updateStatus(a.id, 'ATTENDED')}>Finalizar</Button>}
-                        {['CONFIRMED', 'CHECKED_IN'].includes(a.status) && <Button size="sm" variant="ghost" onClick={() => updateStatus(a.id, 'CANCELLED')}>Cancelar</Button>}
-                      </div>
-                    </li>
-                  ))}
+                        <div className={cn('w-1 shrink-0 rounded-full', st.dot)} />
+                        <div className="min-w-0 flex-1">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <Link href={`/pacientes/${a.patient.id}`} className="truncate font-medium text-gray-900 hover:text-brand-700">
+                              {a.patient.fullName}
+                            </Link>
+                            <span className={cn('rounded-full px-2 py-0.5 text-[11px] font-medium', st.classes)}>{st.label}</span>
+                            {a.channel === 'TELEHEALTH' && <span className="text-xs">🎥</span>}
+                          </div>
+                          <div className="truncate text-xs text-gray-500">
+                            {a.service?.name ?? a.reason ?? 'Consulta'} {a.room ? `· ${a.room.name}` : ''}
+                          </div>
+                          <div className="mt-2 flex flex-wrap gap-1.5">
+                            {clinical && ['CONFIRMED', 'CHECKED_IN', 'IN_PROGRESS', 'REQUESTED'].includes(a.status) && (
+                              <Button size="sm" onClick={() => router.push(`/pacientes/${a.patient.id}?atender=${a.id}`)}>
+                                {a.status === 'IN_PROGRESS' ? 'Continuar' : 'Atender'}
+                              </Button>
+                            )}
+                            {a.status === 'CONFIRMED' && (
+                              <Button size="sm" variant="secondary" onClick={() => updateStatus(a, 'CHECKED_IN')}>Llegó</Button>
+                            )}
+                            {wa && (
+                              <a href={wa} target="_blank" rel="noreferrer"
+                                 className="inline-flex items-center rounded-lg border border-green-200 bg-green-50 px-3 py-1.5 text-sm font-medium text-green-700 hover:bg-green-100">
+                                Recordar por WhatsApp
+                              </a>
+                            )}
+                            {!clinical && (a.status === 'CHECKED_IN' || a.status === 'IN_PROGRESS') && (
+                              <Button size="sm" variant="secondary" onClick={() => updateStatus(a, 'ATTENDED')}>Finalizar</Button>
+                            )}
+                            {['CONFIRMED', 'REQUESTED'].includes(a.status) && (
+                              <>
+                                <Button size="sm" variant="ghost" onClick={() => updateStatus(a, 'NO_SHOW')}>No asistió</Button>
+                                <Button size="sm" variant="ghost" onClick={() => updateStatus(a, 'CANCELLED')}>Cancelar</Button>
+                              </>
+                            )}
+                          </div>
+                        </div>
+                      </li>
+                    );
+                  })}
               </ul>
             </Card>
           ))}
         </div>
       )}
 
-      <AppointmentForm open={openForm} onClose={() => setOpenForm(false)} onCreated={load} defaultDate={date} />
+      <AppointmentForm
+        open={openForm}
+        onClose={() => { setOpenForm(false); if (search.get('paciente') || search.get('nueva')) router.replace('/agenda'); }}
+        onCreated={(d) => { if (d !== date) setDate(d); else load(); }}
+        defaultDate={date}
+        presetPatientId={presetPatient}
+      />
     </div>
   );
 }
 
+function Chip({ label, value, tone }: { label: string; value: number; tone?: 'blue' | 'indigo' | 'green' }) {
+  return (
+    <span className={cn('rounded-full px-3 py-1 font-medium',
+      tone === 'blue' ? 'bg-blue-50 text-blue-700'
+        : tone === 'indigo' ? 'bg-indigo-50 text-indigo-700'
+        : tone === 'green' ? 'bg-green-50 text-green-700'
+        : 'bg-gray-100 text-gray-700')}>
+      {label}: <strong>{value}</strong>
+    </span>
+  );
+}
+
+interface ServiceOpt { id: string; name: string; durationMinutes: number; priceParticular: string | number; specialty: string | null }
+
 function AppointmentForm({
-  open, onClose, onCreated, defaultDate,
-}: { open: boolean; onClose: () => void; onCreated: () => void; defaultDate: string }) {
-  const [patients, setPatients] = useState<{ id: string; fullName: string }[]>([]);
-  const [professionals, setProfs] = useState<{ id: string; fullName: string; specialty: string | null }[]>([]);
-  const [services, setServices] = useState<{ id: string; name: string; durationMinutes: number }[]>([]);
+  open, onClose, onCreated, defaultDate, presetPatientId,
+}: {
+  open: boolean; onClose: () => void; onCreated: (date: string) => void;
+  defaultDate: string; presetPatientId?: string;
+}) {
+  const user = useAuth((s) => s.user);
+  const [patients, setPatients] = useState<{ id: string; fullName: string; documentId: string }[]>([]);
+  const [professionals, setProfs] = useState<{ id: string; fullName: string; specialty: string | null; isActive: boolean }[]>([]);
+  const [services, setServices] = useState<ServiceOpt[]>([]);
+  const [patientQuery, setPatientQuery] = useState('');
   const [patientId, setPatientId] = useState('');
   const [professionalId, setProfessionalId] = useState('');
   const [serviceId, setServiceId] = useState('');
@@ -132,28 +265,44 @@ function AppointmentForm({
   const [time, setTime] = useState('09:00');
   const [reason, setReason] = useState('');
   const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!open) return;
     Promise.all([
-      apiFetch<{ data: any[] }>('/api/patients?pageSize=100'),
-      apiFetch<any[]>('/api/users/professionals'),
-      apiFetch<any[]>('/api/tenants/me').then(async () => apiFetch<any[]>(`/api/tenants/me`)).then(() => apiFetch<any[]>(`/api/appointments?from=${new Date().toISOString()}&to=${new Date().toISOString()}`)).catch(() => []),
-    ]).then(([p, pr]) => {
+      apiFetch<{ data: { id: string; fullName: string; documentId: string }[] }>('/api/patients?pageSize=100'),
+      apiFetch<{ id: string; fullName: string; specialty: string | null; isActive: boolean }[]>('/api/users/professionals'),
+      apiFetch<ServiceOpt[]>('/api/catalog/services').catch(() => [] as ServiceOpt[]),
+    ]).then(([p, pr, sv]) => {
       setPatients(p.data);
-      setProfs(pr.filter((x: any) => x.isActive));
-    });
-    // Services
-    fetch(`${process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000'}/api/tenants/me`).catch(() => {});
-  }, [open]);
+      const active = pr.filter((x) => x.isActive);
+      setProfs(active);
+      setServices(sv);
+      if (user?.role === 'PROFESSIONAL') setProfessionalId(user.id);
+      else if (active.length === 1) setProfessionalId(active[0].id);
+      if (presetPatientId) {
+        setPatientId(presetPatientId);
+        const found = p.data.find((x) => x.id === presetPatientId);
+        if (found) setPatientQuery(found.fullName);
+      }
+    }).catch((err) => toast.error(errorMessage(err, 'No se pudieron cargar los datos.')));
+  }, [open, presetPatientId, user]);
 
   useEffect(() => { setDate(defaultDate); }, [defaultDate]);
 
+  const filteredPatients = useMemo(() => {
+    const q = patientQuery.trim().toLowerCase();
+    if (!q) return patients.slice(0, 8);
+    return patients.filter((p) => p.fullName.toLowerCase().includes(q) || p.documentId.includes(q)).slice(0, 8);
+  }, [patients, patientQuery]);
+
+  const selectedProf = professionals.find((p) => p.id === professionalId);
+  const visibleServices = selectedProf?.specialty
+    ? services.filter((s) => !s.specialty || s.specialty === selectedProf.specialty)
+    : services;
+
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
-    setError(null);
-    if (!patientId || !professionalId) { setError('Selecciona paciente y profesional.'); return; }
+    if (!patientId || !professionalId) { toast.error('Selecciona paciente y profesional.'); return; }
     setSubmitting(true);
     try {
       const startsAt = new Date(`${date}T${time}:00`).toISOString();
@@ -165,23 +314,45 @@ function AppointmentForm({
           startsAt, reason: reason || undefined,
         },
       });
-      onCreated(); onClose();
-      setPatientId(''); setServiceId(''); setReason('');
-    } catch (err: any) {
-      setError(err.message === 'TIME_SLOT_CONFLICT'
-        ? 'El profesional ya tiene una cita en ese horario.'
-        : 'No fue posible crear la cita.');
+      toast.success('Cita agendada');
+      onCreated(date); onClose();
+      setPatientId(''); setPatientQuery(''); setServiceId(''); setReason('');
+    } catch (err) {
+      toast.error(errorMessage(err, 'No fue posible crear la cita.'));
     } finally { setSubmitting(false); }
   }
+
+  const selectedPatient = patients.find((p) => p.id === patientId);
 
   return (
     <Modal open={open} onClose={onClose} title="Nueva cita" size="lg">
       <form onSubmit={onSubmit} className="space-y-4">
-        <Select label="Paciente" value={patientId} onChange={(e) => setPatientId(e.target.value)} required>
-          <option value="">— Selecciona —</option>
-          {patients.map((p) => <option key={p.id} value={p.id}>{p.fullName}</option>)}
-        </Select>
-        <Select label="Profesional" value={professionalId} onChange={(e) => setProfessionalId(e.target.value)} required>
+        <div>
+          <label className="mb-1 block text-sm font-medium text-gray-700">Paciente</label>
+          {selectedPatient ? (
+            <div className="flex items-center justify-between rounded-lg border border-brand-200 bg-brand-50 px-3 py-2">
+              <span className="text-sm font-medium text-brand-800">{selectedPatient.fullName} <span className="text-xs text-brand-600">· {selectedPatient.documentId}</span></span>
+              <button type="button" onClick={() => { setPatientId(''); setPatientQuery(''); }} className="text-xs text-brand-700 hover:underline">Cambiar</button>
+            </div>
+          ) : (
+            <>
+              <Input placeholder="Buscar por nombre o documento…" value={patientQuery} onChange={(e) => setPatientQuery(e.target.value)} autoFocus />
+              <div className="mt-1 max-h-40 overflow-y-auto rounded-lg border border-gray-100">
+                {filteredPatients.map((p) => (
+                  <button key={p.id} type="button" onClick={() => { setPatientId(p.id); setPatientQuery(p.fullName); }}
+                          className="flex w-full items-center justify-between px-3 py-2 text-left text-sm hover:bg-gray-50">
+                    <span>{p.fullName}</span><span className="text-xs text-gray-400">{p.documentId}</span>
+                  </button>
+                ))}
+                {filteredPatients.length === 0 && (
+                  <div className="px-3 py-2 text-xs text-gray-500">Sin resultados. <Link href="/pacientes" className="text-brand-600 hover:underline">Crear paciente</Link></div>
+                )}
+              </div>
+            </>
+          )}
+        </div>
+        <Select label="Profesional" value={professionalId} onChange={(e) => { setProfessionalId(e.target.value); setServiceId(''); }} required
+                disabled={user?.role === 'PROFESSIONAL'}>
           <option value="">— Selecciona —</option>
           {professionals.map((p) => (
             <option key={p.id} value={p.id}>
@@ -189,15 +360,20 @@ function AppointmentForm({
             </option>
           ))}
         </Select>
+        <Select label="Servicio" value={serviceId} onChange={(e) => setServiceId(e.target.value)}>
+          <option value="">— Consulta general (30 min) —</option>
+          {visibleServices.map((s) => (
+            <option key={s.id} value={s.id}>{s.name} · {s.durationMinutes} min · {formatCop(s.priceParticular)}</option>
+          ))}
+        </Select>
         <div className="grid grid-cols-2 gap-3">
           <Input label="Fecha" type="date" value={date} onChange={(e) => setDate(e.target.value)} required />
-          <Input label="Hora" type="time" value={time} onChange={(e) => setTime(e.target.value)} required />
+          <Input label="Hora" type="time" step={900} value={time} onChange={(e) => setTime(e.target.value)} required />
         </div>
-        <Input label="Motivo (opcional)" value={reason} onChange={(e) => setReason(e.target.value)} />
-        {error && <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
+        <Input label="Motivo (opcional)" value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Ej. dolor en molar inferior derecho" />
         <div className="flex justify-end gap-2">
           <Button type="button" variant="secondary" onClick={onClose}>Cancelar</Button>
-          <Button type="submit" loading={submitting}>Crear cita</Button>
+          <Button type="submit" loading={submitting}>Agendar cita</Button>
         </div>
       </form>
     </Modal>

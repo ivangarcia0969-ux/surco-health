@@ -33,7 +33,8 @@ export default async function dentalRoutes(app: FastifyInstance) {
 
   app.get<{ Params: { patientId: string } }>(
     '/procedures/:patientId',
-    { preHandler: [authMiddleware, requireRole('CLINIC_OWNER', 'PROFESSIONAL')] },
+    // Recepción/caja lo necesitan para presupuestos y cobros (diente, trabajo, valor)
+    { preHandler: [authMiddleware, requireRole('CLINIC_OWNER', 'PROFESSIONAL', 'RECEPTIONIST', 'BILLING')] },
     async (req) => svc.listProcedures(auditContextFromReq(req), req.params.patientId),
   );
 

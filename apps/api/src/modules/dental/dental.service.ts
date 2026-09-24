@@ -84,10 +84,13 @@ export async function createDentalTreatment(
       include: { dentalProcedures: true },
     });
 
-    // Aplicar cambios al odontograma
-    if (input.applyToChart && patient.dentalChart) {
-      const currentState = (patient.dentalChart.state as Record<string, Record<string, string>>) ?? {};
+    // Aplicar cambios al odontograma (lo crea si el paciente aún no tiene).
+    // Procedimientos sin diente específico (p.ej. "GEN" = profilaxis de boca
+    // completa) no se pintan en el esquema.
+    if (input.applyToChart) {
+      const currentState = (patient.dentalChart?.state as Record<string, Record<string, string>>) ?? {};
       for (const p of input.procedures) {
+        if (!/^\d{2}$/.test(p.toothNumber)) continue;
         if (!currentState[p.toothNumber]) currentState[p.toothNumber] = {};
         if (p.surfaces.length === 0) {
           // condición que aplica al diente entero
@@ -98,9 +101,10 @@ export async function createDentalTreatment(
           }
         }
       }
-      await tx.dentalChart.update({
+      await tx.dentalChart.upsert({
         where: { patientId: input.patientId },
-        data: { state: currentState as any, lastUpdatedAt: new Date() },
+        update: { state: currentState as any, lastUpdatedAt: new Date() },
+        create: { patientId: input.patientId, state: currentState as any, numbering: 'FDI' },
       });
     }
 

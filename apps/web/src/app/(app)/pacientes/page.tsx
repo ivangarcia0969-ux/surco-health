@@ -1,6 +1,7 @@
 'use client';
-import { useCallback, useEffect, useState } from 'react';
+import { Suspense, useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { apiFetch } from '@/lib/api';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
@@ -25,11 +26,24 @@ interface ListResp {
 }
 
 export default function PatientsPage() {
+  return (
+    <Suspense fallback={<Card className="h-40 animate-pulse bg-gray-100" />}>
+      <PatientsList />
+    </Suspense>
+  );
+}
+
+function PatientsList() {
   const [q, setQ] = useState('');
   const [data, setData] = useState<PatientRow[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
   const [openForm, setOpenForm] = useState(false);
+  const search = useSearchParams();
+  const router = useRouter();
+
+  // Acceso rápido desde el inicio: /pacientes?nuevo=1 abre el formulario
+  useEffect(() => { if (search.get('nuevo')) setOpenForm(true); }, [search]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -61,7 +75,7 @@ export default function PatientsPage() {
 
       <Card className="overflow-x-auto p-0">
         {loading ? (
-          <p className="py-6 text-center text-sm text-gray-500">Cargando…</p>
+          <div className="space-y-2 p-4">{[0, 1, 2, 3, 4].map((i) => <div key={i} className="h-11 animate-pulse rounded-lg bg-gray-100" />)}</div>
         ) : data.length === 0 ? (
           <p className="py-6 text-center text-sm text-gray-500">Sin pacientes.</p>
         ) : (
@@ -77,16 +91,23 @@ export default function PatientsPage() {
             </thead>
             <tbody className="divide-y divide-gray-100">
               {data.map((p) => (
-                <tr key={p.id}>
-                  <td className="px-4 py-3 font-medium">{p.fullName}</td>
-                  <td className="px-4 py-3 text-gray-600">{p.documentType} {p.documentId}</td>
-                  <td className="px-4 py-3 text-gray-600">{calcAge(p.birthdate)} años</td>
-                  <td className="px-4 py-3 text-xs text-gray-500">
-                    {p.phone ?? '—'}{p.email ? ` · ${p.email}` : ''}
+                <tr key={p.id} className="cursor-pointer transition hover:bg-gray-50" onClick={() => router.push(`/pacientes/${p.id}`)}>
+                  <td className="px-4 py-3">
+                    <div className="flex items-center gap-3">
+                      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-brand-50 text-xs font-semibold text-brand-700">
+                        {p.fullName.split(' ').slice(0, 2).map((n) => n[0]).join('').toUpperCase()}
+                      </span>
+                      <span className="font-medium text-gray-900">{p.fullName}</span>
+                    </div>
                   </td>
-                  <td className="px-4 py-3 text-right">
-                    <Link href={`/pacientes/${p.id}`} className="text-sm font-medium text-brand-600 hover:underline">
-                      Abrir HCE →
+                  <td className="whitespace-nowrap px-4 py-3 text-gray-600">{p.documentType} {p.documentId}</td>
+                  <td className="whitespace-nowrap px-4 py-3 text-gray-600">{calcAge(p.birthdate)} años</td>
+                  <td className="px-4 py-3 text-xs text-gray-500">
+                    {p.phone ?? '—'}{p.email ? <span className="hidden lg:inline"> · {p.email}</span> : null}
+                  </td>
+                  <td className="whitespace-nowrap px-4 py-3 text-right">
+                    <Link href={`/pacientes/${p.id}`} onClick={(e) => e.stopPropagation()} className="text-sm font-medium text-brand-600 hover:underline">
+                      Abrir ficha →
                     </Link>
                   </td>
                 </tr>
