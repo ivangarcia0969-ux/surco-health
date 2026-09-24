@@ -186,6 +186,31 @@ export async function updateTemplate(ctx: AuditContext, id: string, input: Updat
 // Render (preview y emisión comparten exactamente la misma lógica)
 // ============================================================
 
+/**
+ * Profesional que figura en el documento:
+ *  - el elegido en el formulario (debe ser PROFESSIONAL activo de la clínica), o
+ *  - quien emite, solo si es PROFESSIONAL.
+ * Si emite recepción/dueña sin elegir profesional, el nombre queda en blanco
+ * para llenarlo a mano (nunca se nombra como profesional a quien no lo es).
+ */
+async function resolveProfessional(ctx: AuditContext, professionalId?: string) {
+  if (professionalId) {
+    const pro = await prisma.user.findFirst({
+      where: { id: professionalId, tenantId: ctx.tenantId, role: 'PROFESSIONAL', isActive: true },
+      select: { id: true, fullName: true, licenseNumber: true },
+    });
+    if (!pro) throw new AppError('PROFESSIONAL_NOT_FOUND', 404);
+    return pro;
+  }
+  if (ctx.actorId && ctx.actorRole === 'PROFESSIONAL') {
+    return prisma.user.findFirst({
+      where: { id: ctx.actorId, tenantId: ctx.tenantId },
+      select: { id: true, fullName: true, licenseNumber: true },
+    });
+  }
+  return null;
+}
+
 async function buildRender(ctx: AuditContext, input: PreviewConsentInput) {
   const [patient, template, tenant, professional] = await Promise.all([
     prisma.patient.findFirst({
@@ -200,12 +225,7 @@ async function buildRender(ctx: AuditContext, input: PreviewConsentInput) {
       where: { id: ctx.tenantId },
       select: { tradeName: true, legalName: true, timezone: true },
     }),
-    ctx.actorId
-      ? prisma.user.findFirst({
-        where: { id: ctx.actorId, tenantId: ctx.tenantId },
-        select: { fullName: true, licenseNumber: true },
-      })
-      : Promise.resolve(null),
+    resolveProfessional(ctx, input.professionalId),
   ]);
   if (!patient) throw new AppError('PATIENT_NOT_FOUND', 404);
   if (!template) throw new AppError('TEMPLATE_NOT_FOUND', 404);
@@ -231,6 +251,7 @@ async function buildRender(ctx: AuditContext, input: PreviewConsentInput) {
     patient,
     template,
     procedure,
+    professional,
     bodyRendered: renderConsentBody(template.bodyMarkdown, vars),
   };
 }
@@ -294,6 +315,8 @@ export async function issueConsent(ctx: AuditContext, input: IssueConsentInput) 
       templateName: r.template.name,
       templateVersion: r.template.version,
       procedureDetail: r.procedure || null,
+      professionalId: r.professional?.id ?? null,
+      professionalName: r.professional?.fullName ?? null,
       bodyHash,
     },
   });

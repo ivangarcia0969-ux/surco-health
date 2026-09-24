@@ -59,6 +59,9 @@ export const previewConsentSchema = z.object({
   templateId: idSchema,
   // Texto libre opcional, ej. "Exodoncia del diente 38"
   procedureDetail: z.string().trim().max(300).optional(),
+  // Profesional tratante. Obligatorio en la práctica cuando emite recepción o la
+  // dueña: el documento no puede nombrar como "profesional" a quien no lo es.
+  professionalId: idSchema.optional(),
 });
 export type PreviewConsentInput = z.infer<typeof previewConsentSchema>;
 

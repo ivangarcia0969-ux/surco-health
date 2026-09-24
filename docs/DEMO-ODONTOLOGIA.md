@@ -26,7 +26,8 @@ Contraseña de todos los usuarios: **`Sonrisa2026*`**
    en *María Fernanda Ospina* (8:00 a. m.). Aparece la barra verde "Atendiendo cita".
 4. **Odontograma** — tocar superficies con la paleta de colores (caries, resina, endodoncia…). Guardar.
 5. **Plan y presupuesto** — "+ Agregar procedimientos": tocar el diente en el esquema, elegir el
-   servicio (el precio sale solo del catálogo), marcar superficies. El odontograma se actualiza solo.
+   servicio (el precio sale solo del catálogo), marcar superficies. Lo que se marca "Realizado hoy" (o
+   luego con **✓ Terminar**) se pinta solo en el odontograma; una exodoncia planeada sale como "extracción indicada".
    Luego **"📄 Presupuesto / PDF"**: documento con logo, datos de la clínica, valores, condiciones y
    firmas. Botón **"Enviar por WhatsApp"**.
 6. **Pagos** — "💵 Registrar abono" (efectivo, tarjeta, Nequi/transferencia) → se genera el
@@ -34,7 +35,8 @@ Contraseña de todos los usuarios: **`Sonrisa2026*`**
 7. **Recetas** — "+ Nueva receta" con atajos odontológicos (amoxicilina, ibuprofeno, clorhexidina…).
    La paciente es **alérgica a la penicilina**: la app lo advierte en rojo. Imprimir con firma del
    profesional (la firma se dibuja una vez en **Mi perfil y firma**).
-8. **Consentimientos** — "+ Nuevo consentimiento" → elegir *Exodoncia* → escribir "Exodoncia del 38"
+8. **Consentimientos** — "+ Nuevo consentimiento" → elegir *Exodoncia* → (si lo emite recepción o la dueña,
+   elegir el odontólogo tratante) → escribir "Exodoncia del 38"
    → el paciente lee en la tablet/celular → marca "He leído" → **firma con el dedo** → queda guardado
    con fecha, hora, IP y huella SHA-256 (Ley 527 de 1999). Imprimir o guardar en PDF.
 9. **Radiografías** — "🩻 Radiografías" → subir una foto o "📷 Tomar foto" desde el celular. Abrir el
@@ -60,14 +62,16 @@ cd /opt/surco-health
 docker compose -f infra/docker-compose.prod.yml --env-file .env run --rm --entrypoint sh api -c "cd /repo && pnpm --filter @surco/db db:seed:demo"
 ```
 
-## 4. Publicar la versión nueva en el servidor
+## 4. Publicar la versión nueva en el servidor (un solo comando)
+
+Desde la terminal del computador (tarda 8-12 minutos; deja la ventana abierta):
 
 ```bash
-ssh root@2.24.89.123
-cd /opt/surco-health
-bash infra/scripts/deploy.sh 2>&1 | tee /tmp/surco-deploy.log
-docker compose -f infra/docker-compose.prod.yml --env-file .env run --rm --entrypoint sh api -c "cd /repo && pnpm --filter @surco/db db:seed:demo"
+ssh -o ServerAliveInterval=30 root@2.24.89.123 "cd /opt/surco-health && git fetch origin && git reset --hard origin/main && bash infra/scripts/deploy-demo.sh"
 ```
+
+El script `infra/scripts/deploy-demo.sh` hace todo: compila, actualiza la base de datos, reinicia la
+API, la web y el worker, carga los datos demo y verifica que responda. Al final debe decir **✅ Listo**.
 
 Después de publicar: abrir la web con **Ctrl + Shift + R** (o en ventana de incógnito) para no ver
 la versión vieja guardada en el navegador.

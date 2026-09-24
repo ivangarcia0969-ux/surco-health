@@ -264,6 +264,21 @@ function NewConsentModal({ patientId, onClose, onSigned }: {
   const [templatesError, setTemplatesError] = useState<string | null>(null);
   const [templateId, setTemplateId] = useState<string | null>(null);
   const [procedure, setProcedure] = useState('');
+  // Profesional tratante: si emite recepción o la dueña, hay que elegirlo
+  const myRole = useAuth((s) => s.user?.role);
+  const needsProfessional = myRole !== 'PROFESSIONAL';
+  const [professionals, setProfessionals] = useState<{ id: string; fullName: string; isActive: boolean }[]>([]);
+  const [professionalId, setProfessionalId] = useState('');
+  useEffect(() => {
+    if (!needsProfessional) return;
+    apiFetch<{ id: string; fullName: string; isActive: boolean }[]>('/api/users/professionals')
+      .then((r) => {
+        const act = r.filter((p) => p.isActive);
+        setProfessionals(act);
+        if (act.length === 1) setProfessionalId(act[0].id);
+      })
+      .catch(() => setProfessionals([]));
+  }, [needsProfessional]);
 
   // Paso 2
   const [preview, setPreview] = useState<PreviewResponse | null>(null);
@@ -317,7 +332,7 @@ function NewConsentModal({ patientId, onClose, onSigned }: {
     try {
       const r = await apiFetch<PreviewResponse>('/api/consents/preview', {
         method: 'POST',
-        body: { patientId, templateId, procedureDetail: procedure.trim() || undefined },
+        body: { patientId, templateId, procedureDetail: procedure.trim() || undefined, professionalId: professionalId || undefined },
       });
       setPreview(r);
       setAccepted(false);
@@ -362,7 +377,7 @@ function NewConsentModal({ patientId, onClose, onSigned }: {
     try {
       const r = await apiFetch<IssueResponse>('/api/consents', {
         method: 'POST',
-        body: { patientId, templateId, procedureDetail: procedure.trim() || undefined, signatureImg },
+        body: { patientId, templateId, procedureDetail: procedure.trim() || undefined, professionalId: professionalId || undefined, signatureImg },
       });
       setResult(r);
       setStep('done');
@@ -455,6 +470,21 @@ function NewConsentModal({ patientId, onClose, onSigned }: {
               </div>
             )}
 
+            {needsProfessional && (
+              <div className="mt-5">
+                <label className="mb-1 block text-sm font-medium text-gray-700">Profesional tratante</label>
+                <select
+                  value={professionalId}
+                  onChange={(e) => setProfessionalId(e.target.value)}
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-100"
+                >
+                  <option value="">— Elegir odontólogo / profesional —</option>
+                  {professionals.map((p) => <option key={p.id} value={p.id}>{p.fullName}</option>)}
+                </select>
+                <p className="mt-1 text-xs text-gray-500">Su nombre y registro aparecen en el documento como quien explicó el procedimiento.</p>
+              </div>
+            )}
+
             <div className="mt-5">
               <Input
                 label="Procedimiento / detalle (opcional)"
@@ -462,7 +492,7 @@ function NewConsentModal({ patientId, onClose, onSigned }: {
                 value={procedure}
                 maxLength={300}
                 onChange={(e) => setProcedure(e.target.value)}
-                onKeyDown={(e) => { if (e.key === 'Enter' && templateId) goToReading(); }}
+                onKeyDown={(e) => { if (e.key === 'Enter' && templateId && (!needsProfessional || professionalId)) goToReading(); }}
                 hint="Aparece en el documento. Si lo deja vacío se indica «según el plan de tratamiento explicado por el profesional»."
               />
             </div>
@@ -603,7 +633,7 @@ function NewConsentModal({ patientId, onClose, onSigned }: {
             )}
 
             {step === 1 && (
-              <Button onClick={goToReading} disabled={!templateId} loading={loadingPreview}>
+              <Button onClick={goToReading} disabled={!templateId || (needsProfessional && !professionalId)} loading={loadingPreview}>
                 Continuar a la lectura →
               </Button>
             )}

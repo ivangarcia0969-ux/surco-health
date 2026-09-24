@@ -1,4 +1,5 @@
 'use client';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { apiFetch } from '@/lib/api';
@@ -84,7 +85,7 @@ export function Sidebar({ role, specialty }: { role: string; specialty?: string 
         <div className="min-w-0">
           <div className="truncate text-sm font-semibold text-gray-900">{user?.fullName}</div>
           <div className="truncate text-xs text-gray-500">
-            {specialty ? (SPECIALTY_LABEL[specialty] ?? specialty) : 'Administrador'}
+            {specialty ? (SPECIALTY_LABEL[specialty] ?? specialty) : role === 'RECEPTIONIST' ? 'Recepción' : role === 'BILLING' ? 'Facturación' : 'Administración'}
           </div>
         </div>
       </div>
@@ -134,7 +135,12 @@ export function MobileNav({ role }: { role: string }) {
   const pathname = usePathname();
   const router = useRouter();
   const { refreshToken, clear } = useAuth();
-  const items = navForRole(role).slice(0, 5);
+  const all = navForRole(role);
+  // Máximo 5 botones abajo: si hay más secciones, las sobrantes van en "Más"
+  const items = all.length > 5 ? all.slice(0, 4) : all;
+  const extra = all.length > 5 ? all.slice(4) : [];
+  const [moreOpen, setMoreOpen] = useState(false);
+  useEffect(() => { setMoreOpen(false); }, [pathname]);
 
   async function logout() {
     if (refreshToken) {
@@ -165,7 +171,29 @@ export function MobileNav({ role }: { role: string }) {
             </Link>
           );
         })}
+        {extra.length > 0 && (
+          <button type="button" onClick={() => setMoreOpen((v) => !v)}
+                  className={cn('flex flex-1 flex-col items-center gap-0.5 py-2 text-[10px] font-medium',
+                    moreOpen || extra.some((i) => pathname.startsWith(i.href)) ? 'text-brand-700' : 'text-gray-500')}>
+            <span className={cn('flex h-7 w-10 items-center justify-center rounded-full text-base', moreOpen && 'bg-brand-50')} aria-hidden>☰</span>
+            <span>Más</span>
+          </button>
+        )}
       </nav>
+      {moreOpen && (
+        <div className="fixed inset-0 z-30 bg-black/30 md:hidden print:hidden" onClick={() => setMoreOpen(false)}>
+          <div className="absolute inset-x-3 bottom-20 rounded-2xl bg-white p-2 shadow-xl ring-1 ring-gray-200" onClick={(e) => e.stopPropagation()}>
+            {extra.map((item) => (
+              <Link key={item.href} href={item.href}
+                    className={cn('flex items-center gap-3 rounded-xl px-3 py-3 text-sm font-medium',
+                      pathname.startsWith(item.href) ? 'bg-brand-50 text-brand-700' : 'text-gray-700 hover:bg-gray-50')}>
+                <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-gray-100" aria-hidden>{item.icon}</span>
+                {item.label}
+              </Link>
+            ))}
+          </div>
+        </div>
+      )}
     </>
   );
 }

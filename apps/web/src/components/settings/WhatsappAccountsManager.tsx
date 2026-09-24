@@ -200,7 +200,7 @@ function BotCard({
 
   async function setAsDefault() {
     try {
-      await apiFetch(`/api/whatsapp/accounts/${bot.id}/default`, { method: 'POST' });
+      await apiFetch(`/api/whatsapp/accounts/${bot.id}/default`, { method: 'POST', body: {} });
       onChanged({ kind: 'ok', text: `✓ "${bot.name}" ahora es el bot principal` });
     } catch (err: any) {
       onChanged({ kind: 'err', text: err.message ?? 'Error' });

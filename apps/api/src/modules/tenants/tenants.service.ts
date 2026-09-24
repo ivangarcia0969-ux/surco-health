@@ -33,7 +33,7 @@ export async function getMyTenant(tenantId: string, role?: string | null) {
   delete safe.stripeCustomerId;
   delete safe.stripeSubscriptionId;
   delete safe.stripeSubscriptionStatus;
-  delete safe.taxId;
+  // El NIT se conserva: es dato público y va en presupuestos, recetas y recibos.
   return safe;
 }
 

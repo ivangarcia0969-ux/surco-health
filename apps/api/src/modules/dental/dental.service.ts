@@ -39,6 +39,34 @@ export async function updateDentalChart(
   return chart;
 }
 
+type ChartState = Record<string, Record<string, string>>;
+
+/**
+ * Pinta un procedimiento en el odontograma.
+ *  - Solo lo REALIZADO se pinta con su condición final (resina, corona…).
+ *  - Lo planeado no cambia el diente, salvo la exodoncia planeada, que se marca
+ *    como "extracción indicada" (no como diente ya extraído).
+ *  - Procedimientos sin diente (p.ej. "GEN" = profilaxis de boca completa) no se pintan.
+ *  - Al pintar superficies se quita la marca de "diente completo" para que se vean.
+ */
+function paintProcedure(
+  state: ChartState,
+  p: { toothNumber: string; surfaces: string[]; condition: string; status: string },
+) {
+  if (!/^\d{2}$/.test(p.toothNumber) || p.status === 'CANCELLED') return;
+  let condition: string | null = null;
+  if (p.status === 'COMPLETED') condition = p.condition;
+  else if (p.condition === 'EXTRACTED') condition = 'EXTRACTION_NEEDED';
+  if (!condition) return;
+  const tooth = (state[p.toothNumber] ??= {});
+  if (p.surfaces.length === 0) {
+    tooth['whole'] = condition;
+  } else {
+    delete tooth['whole'];
+    for (const surface of p.surfaces) tooth[surface.toLowerCase()] = condition;
+  }
+}
+
 export async function createDentalTreatment(
   ctx: AuditContext, input: CreateDentalTreatmentInput,
 ) {
@@ -85,22 +113,9 @@ export async function createDentalTreatment(
     });
 
     // Aplicar cambios al odontograma (lo crea si el paciente aún no tiene).
-    // Procedimientos sin diente específico (p.ej. "GEN" = profilaxis de boca
-    // completa) no se pintan en el esquema.
     if (input.applyToChart) {
-      const currentState = (patient.dentalChart?.state as Record<string, Record<string, string>>) ?? {};
-      for (const p of input.procedures) {
-        if (!/^\d{2}$/.test(p.toothNumber)) continue;
-        if (!currentState[p.toothNumber]) currentState[p.toothNumber] = {};
-        if (p.surfaces.length === 0) {
-          // condición que aplica al diente entero
-          currentState[p.toothNumber]['whole'] = p.condition;
-        } else {
-          for (const surface of p.surfaces) {
-            currentState[p.toothNumber][surface.toLowerCase()] = p.condition;
-          }
-        }
-      }
+      const currentState = (patient.dentalChart?.state as ChartState) ?? {};
+      for (const p of input.procedures) paintProcedure(currentState, p);
       await tx.dentalChart.upsert({
         where: { patientId: input.patientId },
         update: { state: currentState as any, lastUpdatedAt: new Date() },
@@ -122,8 +137,12 @@ export async function createDentalTreatment(
 export async function listProcedures(ctx: AuditContext, patientId: string) {
   return prisma.dentalProcedure.findMany({
     where: { clinicalRecord: { patientId, tenantId: ctx.tenantId } },
+    // Solo lo que usan el plan y el presupuesto: recepción/caja también llaman
+    // esta ruta y NO deben recibir el contenido del registro clínico.
     include: {
-      clinicalRecord: { include: { professional: { select: { id: true, fullName: true } } } },
+      clinicalRecord: {
+        select: { id: true, createdAt: true, professional: { select: { id: true, fullName: true } } },
+      },
     },
     orderBy: { clinicalRecord: { createdAt: 'desc' } },
   });
@@ -136,6 +155,7 @@ export async function updateProcedureStatus(
 ) {
   const proc = await prisma.dentalProcedure.findFirst({
     where: { id: procedureId, clinicalRecord: { tenantId: ctx.tenantId } },
+    include: { clinicalRecord: { select: { patientId: true } } },
   });
   if (!proc) throw new AppError('PROCEDURE_NOT_FOUND', 404);
 
@@ -146,6 +166,19 @@ export async function updateProcedureStatus(
       performedAt: status === 'COMPLETED' ? new Date() : null,
     },
   });
+
+  // Al terminar un procedimiento, el odontograma refleja el trabajo realizado
+  if (status === 'COMPLETED') {
+    const patientId = proc.clinicalRecord.patientId;
+    const chart = await prisma.dentalChart.findUnique({ where: { patientId } });
+    const state = (chart?.state as ChartState) ?? {};
+    paintProcedure(state, { ...proc, status });
+    await prisma.dentalChart.upsert({
+      where: { patientId },
+      update: { state: state as any, lastUpdatedAt: new Date() },
+      create: { patientId, state: state as any, numbering: 'FDI' },
+    });
+  }
 
   await logAudit({
     ctx, action: 'UPDATE_PATIENT', entityType: 'DentalProcedure', entityId: procedureId,

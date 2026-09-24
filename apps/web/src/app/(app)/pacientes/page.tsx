@@ -7,6 +7,7 @@ import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Input, Select } from '@/components/ui/Input';
 import { Modal } from '@/components/ui/Modal';
+import { toast } from '@/components/ui/Toaster';
 import { calcAge } from '@/lib/utils';
 
 interface PatientRow {
@@ -131,6 +132,8 @@ function PatientForm({ open, onClose, onCreated }: { open: boolean; onClose: () 
     gender: 'MALE' as 'MALE' | 'FEMALE' | 'NON_BINARY' | 'PREFER_NOT_TO_SAY' | 'OTHER',
     phone: '',
     email: '',
+    insurerName: '',
+    allergiesSummary: '',
     acceptedPrivacy: false,
   });
   const [submitting, setSubmitting] = useState(false);
@@ -153,9 +156,13 @@ function PatientForm({ open, onClose, onCreated }: { open: boolean; onClose: () 
           ...form,
           birthdate: new Date(`${form.birthdate}T00:00:00`).toISOString(),
           email: form.email || undefined,
+          phone: form.phone.trim() || undefined,
+          insurerName: form.insurerName.trim() || undefined,
+          allergiesSummary: form.allergiesSummary.trim() || undefined,
         },
       });
-      setForm({ documentType: 'CC', documentId: '', fullName: '', birthdate: '', gender: 'MALE', phone: '', email: '', acceptedPrivacy: false });
+      setForm({ documentType: 'CC', documentId: '', fullName: '', birthdate: '', gender: 'MALE', phone: '', email: '', insurerName: '', allergiesSummary: '', acceptedPrivacy: false });
+      toast.success('Paciente creado');
       onCreated();
       onClose();
     } catch (err: any) {
@@ -197,6 +204,10 @@ function PatientForm({ open, onClose, onCreated }: { open: boolean; onClose: () 
           <Input label="Teléfono" value={form.phone} onChange={(e) => set('phone', e.target.value)} />
           <div className="md:col-span-2">
             <Input label="Email (opcional)" type="email" value={form.email} onChange={(e) => set('email', e.target.value)} />
+          </div>
+          <Input label="EPS / aseguradora (opcional)" value={form.insurerName} onChange={(e) => set('insurerName', e.target.value)} placeholder="Ej. EPS Sura" />
+          <div className="md:col-span-2">
+            <Input label="Alergias (opcional)" value={form.allergiesSummary} onChange={(e) => set('allergiesSummary', e.target.value)} placeholder="Ej. Penicilina, látex, anestesia con epinefrina…" />
           </div>
         </div>
 
