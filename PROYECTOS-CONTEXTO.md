@@ -29,7 +29,12 @@
   `brand-300/400/800` no existía → 15 elementos invisibles; (4) logo invisible en celular por id de degradado
   SVG duplicado; (5) ficha de paciente se colgaba para recepción (pedía HCE sin permiso); (6) el formulario de
   cita no cargaba servicios.
-- **Pendiente:** publicar en el VPS (`bash infra/scripts/deploy.sh` + `db:seed:demo`), ver guía.
+- **✅ Publicado en producción el 2026-09-24** (commit `bc8431d`), verificado en vivo: login demo, agenda de hoy,
+  caja, consentimientos, recetas y subida a MinIO. Backup previo: `/opt/surco-health/backups/pre-demo-20260924_135351.dump`.
+- **Método de deploy que funciona desde este PC:** `ssh -i ~/.ssh/hostinger_vps -o IdentitiesOnly=yes root@2.24.89.123`
+  (la llave por defecto NO entra). Publicar: `git push origin main` y luego en el VPS
+  `cd /opt/surco-health && git fetch origin && git reset --hard origin/main && nohup bash infra/scripts/deploy-demo.sh > /tmp/surco-deploy.log 2>&1 &`
+  (≈2 min con caché de Docker). Refrescar solo la agenda demo: `db:seed:demo` (ver `docs/DEMO-ODONTOLOGIA.md`).
 
 ### 2026-06-09 — Branding, temas visuales, control de prueba y escalabilidad
 - **Rebrand barbería → "Fígaro App"** (antes "SaaS Barberías"/"BarberPro"). Logo tijeras doradas.
