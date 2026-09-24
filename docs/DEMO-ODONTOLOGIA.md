@@ -62,9 +62,15 @@ cd /opt/surco-health
 docker compose -f infra/docker-compose.prod.yml --env-file .env run --rm --entrypoint sh api -c "cd /repo && pnpm --filter @surco/db db:seed:demo"
 ```
 
-## 4. Publicar la versión nueva en el servidor (un solo comando)
+## 4. Publicar la versión nueva en el servidor
 
-Desde la terminal del computador (tarda 8-12 minutos; deja la ventana abierta):
+**Paso 1 — subir el código a GitHub** (desde la carpeta del proyecto `CODEX/surco-health`):
+
+```bash
+git push origin main
+```
+
+**Paso 2 — publicar en el servidor** (tarda 8-12 minutos; deja la ventana abierta):
 
 ```bash
 ssh -o ServerAliveInterval=30 root@2.24.89.123 "cd /opt/surco-health && git fetch origin && git reset --hard origin/main && bash infra/scripts/deploy-demo.sh"
